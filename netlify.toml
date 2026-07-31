@@ -1,0 +1,28 @@
+# netlify.toml
+
+# This is the main build configuration for Netlify
+[build]
+  # This tells Netlify where your final built site will be located.
+  # For Vite projects, it's always the 'dist' folder.
+  publish = "dist"
+  # The command to build your site.
+  command = "npm run build"
+
+  [build.environment]
+  NODE_VERSION = "20.19.0"
+
+[[headers]]
+  for = "/*.png"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+
+[[headers]]
+  for = "/*.jpg"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+
+# SPA redirect rule
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
