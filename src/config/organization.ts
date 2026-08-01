@@ -5,7 +5,7 @@ export const organization = {
   "year": "2026",
   "logo": "/brand/logo.png",
   "favicon": "/brand/logo.png",
-  "nominationBackground": null,
+  "nominationBackground": "/brand/background.jpg",
   "logoFilter": "none",
   "fontUrl": null,
   "fontFamily": "'DM Sans', system-ui, sans-serif",
