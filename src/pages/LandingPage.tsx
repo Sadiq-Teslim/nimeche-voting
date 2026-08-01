@@ -50,6 +50,18 @@ const LandingPage: React.FC<LandingPageProps> = ({ setVoter }) => {
       className="relative min-h-screen w-full overflow-x-hidden text-white flex flex-col"
       style={{ backgroundColor: brand.bg, fontFamily: "'DM Sans', system-ui, sans-serif" }}
     >
+      {/* Background Image Layer */}
+      {organization.nominationBackground && (
+        <>
+          <div
+            aria-hidden="true"
+            className="fixed inset-0 bg-cover bg-center bg-no-repeat opacity-30"
+            style={{ backgroundImage: `url("${assetUrl(organization.nominationBackground)}")` }}
+          />
+          <div aria-hidden="true" className="fixed inset-0 bg-gradient-to-b from-[#0A0D0A]/70 via-[#0A0D0A]/85 to-[#0A0D0A]" />
+        </>
+      )}
+
       {/* Ambient background glow */}
       <div
         aria-hidden="true"

@@ -173,9 +173,19 @@ const NominationPage = () => {
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
 
-  // NIMECHE has no nomination background image
+  // NIMECHE nomination background image layer
   const pageBackdrop = (
     <>
+      {organization.nominationBackground && (
+        <>
+          <div
+            aria-hidden="true"
+            className="fixed inset-0 bg-cover bg-center bg-no-repeat opacity-25 pointer-events-none"
+            style={{ backgroundImage: `url("${assetUrl(organization.nominationBackground)}")` }}
+          />
+          <div aria-hidden="true" className="fixed inset-0 bg-gradient-to-b from-[#0A0D0A]/75 via-[#0A0D0A]/90 to-[#0A0D0A] pointer-events-none" />
+        </>
+      )}
       <div
         aria-hidden="true"
         className="fixed inset-0 pointer-events-none"
