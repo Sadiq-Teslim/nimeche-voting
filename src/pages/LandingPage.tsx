@@ -117,7 +117,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ setVoter }) => {
           style={{ color: brand.textSecondary }}
         >
           {isNominationPortal
-            ? "Recognise the engineers and changemakers shaping NIMECHE UNILAG SF. Submit your nominations below."
+            ? "Recognise the mechanical engineering students and changemakers shaping NIMECHE UNILAG SF. Submit your nominations below."
             : "Make your voice count. Cast your vote across every award category."}
         </p>
 
