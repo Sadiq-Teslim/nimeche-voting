@@ -117,7 +117,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ setVoter }) => {
           style={{ color: brand.textSecondary }}
         >
           {isNominationPortal
-            ? "Recognise the engineers and changemakers shaping NIMechE. Submit your nominations below."
+            ? "Recognise the engineers and changemakers shaping NIMECHE UNILAG SF. Submit your nominations below."
             : "Make your voice count. Cast your vote across every award category."}
         </p>
 
@@ -171,7 +171,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ setVoter }) => {
               <p className="mt-0.5 text-xs" style={{ color: brand.textMuted }}>
                 {isNominationPortal
                   ? "Name, award & optional photo"
-                  : `Verified NIMechE members only`}
+                  : `Verified NIMECHE UNILAG SF members only`}
               </p>
             </div>
           </div>
@@ -213,7 +213,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ setVoter }) => {
         className="relative z-10 border-t py-4 text-center text-xs"
         style={{ borderColor: brand.border, color: brand.textMuted }}
       >
-        NIMechE · {organization.year} · Nigerian Institution of Mechanical Engineers
+        NIMECHE UNILAG SF · {organization.year} · Nigerian Institution of Mechanical Engineers
       </footer>
 
       <ValidationModal

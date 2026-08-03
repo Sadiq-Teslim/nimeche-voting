@@ -1,7 +1,7 @@
 export const organization = {
-  "name": "NIMechE Awards Night",
-  "shortName": "NIMechE",
-  "electionTitle": "NIMechE Awards Night",
+  "name": "NIMECHE UNILAG SF Awards Night",
+  "shortName": "NIMECHE UNILAG SF",
+  "electionTitle": "NIMECHE UNILAG SF Awards Night",
   "year": "2026",
   "logo": "/brand/logo.png",
   "favicon": "/brand/logo.png",
