@@ -53,6 +53,7 @@ const AdminPage = () => {
   const [electionStatus, setElectionStatus] = useState<"open" | "closed">(
     "closed"
   );
+  const [portalMode, setPortalMode] = useState<"nominations" | "voting">("nominations");
   const [electionSetup, setElectionSetup] = useState<ElectionSetup | null>(null);
   const [setupPositions, setSetupPositions] = useState<PositionSetup[]>([]);
   const [setupCandidates, setSetupCandidates] = useState<CandidateSetup[]>([]);
@@ -144,6 +145,7 @@ const AdminPage = () => {
         setCategories(categoriesRes.data.categories);
         setDepartments(categoriesRes.data.departments);
         setElectionStatus(statusRes.data.status);
+        setPortalMode(statusRes.data.portalMode || "nominations");
         setElectionSetup(setupRes.data.election);
         setSetupPositions(setupRes.data.positions || []);
         setSetupCandidates(setupRes.data.candidates || []);
@@ -194,6 +196,7 @@ const AdminPage = () => {
       setCategories(categoriesRes.data.categories);
       setDepartments(categoriesRes.data.departments);
       setElectionStatus(statusRes.data.status);
+      setPortalMode(statusRes.data.portalMode || "nominations");
       setElectionSetup(setupRes.data.election);
       setSetupPositions(setupRes.data.positions || []);
       setSetupCandidates(setupRes.data.candidates || []);
@@ -387,6 +390,19 @@ const AdminPage = () => {
     return { totalVotes, totalCategories, totalNominees };
   }, [results, categories, departments]);
 
+  const handleTogglePortalMode = async () => {
+    setIsProcessingModal(true);
+    try {
+      const res = await api.post("/toggle-portal-mode", {}, authHeaders(adminToken));
+      setPortalMode(res.data.newPortalMode);
+    } catch {
+      alert("Failed to change portal mode.");
+    } finally {
+      setIsProcessingModal(false);
+      setModalState({ ...modalState, isOpen: false });
+    }
+  };
+
   const handleToggleElectionStatus = async () => {
     setIsProcessingModal(true);
     try {
@@ -507,6 +523,12 @@ const AdminPage = () => {
               }`}
             >
               {electionStatus}
+            </span>
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <span className="truncate text-sm font-semibold text-white">Portal Mode</span>
+            <span className={`rounded-full px-2 py-1 text-xs font-bold uppercase ${portalMode === "nominations" ? "bg-amber-500/15 text-amber-300" : "bg-emerald-500/15 text-emerald-300"}`}>
+              {portalMode}
             </span>
           </div>
         </div>
@@ -833,6 +855,18 @@ const AdminPage = () => {
         {activeTab === "settings" && (
           <SettingsTab
             electionStatus={electionStatus}
+            portalMode={portalMode}
+            onTogglePortalModeClick={() =>
+              setModalState({
+                isOpen: true,
+                title: `Switch to ${portalMode === "nominations" ? "Voting" : "Nominations"} Mode`,
+                message: portalMode === "nominations"
+                  ? "This will switch the public portal from Nominations to Voting mode. Users will now see the voting interface instead of the nomination form."
+                  : "This will switch the public portal back to Nominations mode. Users will see the nomination form instead of the voting interface.",
+                onConfirm: handleTogglePortalMode,
+                confirmText: `Yes, Switch to ${portalMode === "nominations" ? "Voting" : "Nominations"}`,
+              })
+            }
             onToggleStatusClick={() =>
               setModalState({
                 isOpen: true,

@@ -26,17 +26,20 @@ const brand = {
 };
 
 const LandingPage: React.FC<LandingPageProps> = ({ setVoter }) => {
-  const isNominationPortal = organization.portalMode === "nominations";
+  const [portalMode, setPortalMode] = useState<"nominations" | "voting">("nominations");
+  const isNominationPortal = portalMode === "nominations";
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [, setLocation] = useLocation();
   const [electionStatus, setElectionStatus] = useState<"open" | "closed" | "loading">("loading");
 
   useEffect(() => {
     document.title = `${organization.electionTitle} ${organization.year} | Home`;
-    if (isNominationPortal) return;
     api
       .get("/election-status")
-      .then((res) => setElectionStatus(res.data.status))
+      .then((res) => {
+        setElectionStatus(res.data.status);
+        setPortalMode(res.data.portalMode || "nominations");
+      })
       .catch(() => setElectionStatus("closed"));
   }, []);
 

@@ -1,16 +1,20 @@
 import React from "react";
-import { Settings, ShieldAlert } from "lucide-react";
+import { Settings, ShieldAlert, Globe } from "lucide-react";
 
 interface SettingsTabProps {
   electionStatus: "open" | "closed";
+  portalMode: "nominations" | "voting";
   onToggleStatusClick: () => void;
+  onTogglePortalModeClick: () => void;
   onResetElectionClick: () => void;
   onDeleteNominationsClick: () => void;
 }
 
 const SettingsTab: React.FC<SettingsTabProps> = ({
   electionStatus,
+  portalMode,
   onToggleStatusClick,
+  onTogglePortalModeClick,
   onResetElectionClick,
   onDeleteNominationsClick,
 }) => {
@@ -18,6 +22,36 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
     <section>
       <h2 className="text-3xl font-bold text-amber-400">Election Settings</h2>
       <div className="mt-6 space-y-6">
+        <div className="bg-slate-800 p-6 rounded-lg border border-slate-700">
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            <Globe className="text-amber-400" /> Portal Mode
+          </h3>
+          <p className="text-sm text-slate-400 mt-2">
+            Control the main interface users see on the portal homepage.
+          </p>
+          <p className="mt-4">
+            Current Mode:{" "}
+            <span
+              className={`font-bold px-2 py-1 rounded-full text-sm ${
+                portalMode === "nominations"
+                  ? "bg-amber-500/20 text-amber-400"
+                  : "bg-emerald-500/20 text-emerald-400"
+              }`}
+            >
+              {portalMode.toUpperCase()}
+            </span>
+          </p>
+          <button
+            onClick={onTogglePortalModeClick}
+            className={`mt-4 font-semibold py-2 px-4 rounded-lg transition-colors ${
+              portalMode === "nominations"
+                ? "bg-emerald-600 hover:bg-emerald-500 text-white"
+                : "bg-amber-600 hover:bg-amber-500 text-white"
+            }`}
+          >
+            {portalMode === "nominations" ? "Switch to Voting" : "Switch to Nominations"}
+          </button>
+        </div>
         <div className="bg-slate-800 p-6 rounded-lg border border-slate-700">
           <h3 className="text-lg font-semibold flex items-center gap-2">
             <Settings className="text-amber-400" /> Election Status

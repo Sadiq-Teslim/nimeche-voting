@@ -68,6 +68,7 @@ export default {
       title: "NIMECHE UNILAG SF Awards Night",
       year: "2026",
       status: "closed",
+      portalMode: "nominations",
     },
     departments: [
       { id: "nimeche", title: "NIMECHE UNILAG SF", sortOrder: 1 },
