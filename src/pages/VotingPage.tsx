@@ -31,13 +31,6 @@ export interface Category {
   nominees: Nominee[];
 }
 type Selections = Record<string, string>;
-interface GroupedCategories {
-  undergraduate: Category[];
-  general: Category[];
-  finalist: Category[];
-  departmental: Category[];
-}
-type MainCategoryKey = keyof GroupedCategories;
 
 // --- CSRF token cache (Fix #5: avoid double round-trip) ---
 let cachedCsrfToken: string | null = null;
@@ -249,12 +242,7 @@ const NomineeCarousel = ({
 const VotingPage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
   const { fullName, department } = voter;
 
-  const [view, setView] = useState<"hub" | "voting">("hub");
-  const [currentMainCategory, setCurrentMainCategory] =
-    useState<MainCategoryKey | null>(null);
-  const [groupedCategories, setGroupedCategories] = useState<GroupedCategories>(
-    { undergraduate: [], general: [], finalist: [], departmental: [] }
-  );
+  const [categories, setCategories] = useState<Category[]>([]);
   const [votedSubCategoryIds, setVotedSubCategoryIds] = useState<string[]>([]);
   const [selections, setSelections] = useState<Selections>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -267,16 +255,7 @@ const VotingPage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
   const [zoomedNominee, setZoomedNominee] = useState<Nominee | null>(null);
   const fingerprintRef = useRef<string | null>(null);
 
-  const mainCategories: {
-    key: MainCategoryKey;
-    title: string;
-    description: string;
-  }[] = [
-    { key: "undergraduate", title: "Undergraduate Awards", description: "Recognizing outstanding undergraduate students." },
-    { key: "general", title: "General Awards", description: "Awards open to students across all years." },
-    { key: "finalist", title: "Finalist Awards", description: "Celebrating the achievements of the graduating class." },
-    { key: "departmental", title: "Departmental Awards", description: "Honoring excellence within your department." },
-  ];
+
 
   useEffect(() => {
     document.title = `${organization.electionTitle} | Voting`;
@@ -294,7 +273,6 @@ const VotingPage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
         );
 
         const jsonData = structureRes.data;
-        const ug: Category[] = [], gen: Category[] = [], fin: Category[] = [];
         let deptCats: Category[] = [];
         const userDepartment = jsonData.departments.find(
           (dept: any) => dept.id === department
@@ -306,12 +284,7 @@ const VotingPage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
             title: `${deptName} - ${subCat.title}`,
           }));
         }
-        jsonData.categories.forEach((cat: Category & { groupKey?: MainCategoryKey }) => {
-          if (cat.groupKey === "undergraduate" || cat.id.startsWith("ug-")) ug.push(cat);
-          else if (cat.groupKey === "general" || cat.id.startsWith("gen-")) gen.push(cat);
-          else if (cat.groupKey === "finalist" || cat.id.startsWith("fin-")) fin.push(cat);
-        });
-        setGroupedCategories({ undergraduate: ug, general: gen, finalist: fin, departmental: deptCats });
+        setCategories([...jsonData.categories, ...deptCats]);
 
         // Use server-side cookie as source of truth for voted categories
         setVotedSubCategoryIds(votedRes.data.votedCategoryIds || []);
@@ -324,16 +297,7 @@ const VotingPage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
     fetchData();
   }, [department]);
 
-  const handleSelectCategory = (key: MainCategoryKey) => {
-    setCurrentMainCategory(key);
-    setView("voting");
-    setSearchTerm("");
-  };
 
-  const handleBackToHub = () => {
-    setView("hub");
-    setCurrentMainCategory(null);
-  };
 
   const handleSelectNominee = (categoryId: string, candidateId: string) => {
     setSelections((prev) => ({ ...prev, [categoryId]: candidateId }));
@@ -384,24 +348,23 @@ const VotingPage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
 
   const closeModalAndGoHome = () => {
     setIsSuccessModalOpen(false);
-    handleBackToHub();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleOpenZoomModal = (nominee: Nominee) => setZoomedNominee(nominee);
   const handleCloseZoomModal = () => setZoomedNominee(null);
 
   const filteredCategories = useMemo(() => {
-    if (!currentMainCategory) return [];
-    if (!searchTerm.trim()) return groupedCategories[currentMainCategory] || [];
+    if (!searchTerm.trim()) return categories;
     const lowercasedSearchTerm = searchTerm.toLowerCase();
-    return (groupedCategories[currentMainCategory] || []).filter(
+    return categories.filter(
       (category) =>
         category.title.toLowerCase().includes(lowercasedSearchTerm) ||
         category.nominees.some((nominee) =>
           nominee.name.toLowerCase().includes(lowercasedSearchTerm)
         )
     );
-  }, [currentMainCategory, groupedCategories, searchTerm]);
+  }, [categories, searchTerm]);
 
   if (!fullName) return <Redirect to="/" />;
 
@@ -453,113 +416,36 @@ const VotingPage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
       <ImageZoomModal nominee={zoomedNominee} onClose={handleCloseZoomModal} />
 
       <div className="relative z-10 max-w-7xl mx-auto p-4 sm:p-8 w-full pt-24 sm:pt-20 pb-64">
-        {view === "hub" ? (
-          <>
-            <header className="text-center mb-12 relative">
-              <img
-                src={assetUrl(organization.logo)}
-                alt={organization.name}
-                className="mx-auto w-24 h-24 object-contain mb-4"
-              />
-              <h1 className="text-3xl font-bold text-white mb-3">
-                {organization.electionTitle} {organization.year}
-              </h1>
-              <p className="text-slate-300 text-lg">
-                Welcome,{" "}
-                <span className="font-semibold bg-gradient-to-r from-amber-200 to-amber-500 bg-clip-text text-transparent">
-                  {fullName}
-                </span>
-                .
-              </p>
-            </header>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {mainCategories.map(({ key, title, description }) => {
-                const totalInCat = groupedCategories[key]?.length || 0;
-                const votedInCat =
-                  groupedCategories[key]?.filter((cat) =>
-                    votedSubCategoryIds.includes(cat.id)
-                  ).length || 0;
-                const isComplete = totalInCat > 0 && votedInCat === totalInCat;
-                return (
-                  <button
-                    key={key}
-                    onClick={() => handleSelectCategory(key)}
-                    disabled={isComplete || totalInCat === 0}
-                    className="bg-slate-900/50 border border-slate-700 rounded-xl p-6 text-left transition-all duration-300 transform hover:border-amber-400/50 hover:-translate-y-1.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center gap-5 group"
-                  >
-                    <div
-                      className={`flex-shrink-0 w-16 h-16 rounded-lg flex items-center justify-center border transition-colors ${
-                        isComplete
-                          ? "bg-amber-500/10 border-amber-500/30"
-                          : "bg-slate-800 border-slate-600"
-                      }`}
-                    >
-                      <img
-                        src={assetUrl(organization.logo)}
-                        alt="Event Logo"
-                        className={`w-10 h-10 transition-transform duration-300 ${
-                          isComplete ? "" : "group-hover:scale-110"
-                        }`}
-                      />
-                    </div>
-                    <div className="flex-grow">
-                      <h2 className="text-xl font-bold text-white">{title}</h2>
-                      <p className="text-slate-400 text-sm mt-1">
-                        {description}
-                      </p>
-                      <div className="text-sm font-semibold text-slate-400 mt-2">
-                        {isComplete ? (
-                          <span className="text-amber-400 flex items-center gap-1.5">
-                            <ShieldCheck size={16} /> COMPLETED
-                          </span>
-                        ) : totalInCat > 0 ? (
-                          <span>Voted {votedInCat} of {totalInCat}</span>
-                        ) : (
-                          <span>No awards available</span>
-                        )}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
+        <header className="fixed top-0 left-0 right-0 z-30 bg-black/30 backdrop-blur-md border-b border-slate-800">
+          <div className="max-w-7xl mx-auto p-4 flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <img src={assetUrl(organization.logo)} alt="Logo" className="w-8 h-8 object-contain" />
+              <h1 className="text-xl font-bold text-white hidden sm:block">{organization.electionTitle} {organization.year}</h1>
             </div>
-          </>
-        ) : (
-          currentMainCategory && (
-            <>
-              <header className="fixed top-0 left-0 right-0 z-30 bg-black/30 backdrop-blur-md border-b border-slate-800">
-                <div className="max-w-7xl mx-auto p-4 flex flex-wrap items-center justify-between gap-4">
-                  <button
-                    onClick={handleBackToHub}
-                    className="flex items-center gap-2 text-slate-300 font-semibold bg-slate-800/50 hover:bg-slate-700/50 px-4 py-2 rounded-lg transition-colors border border-slate-600 self-start whitespace-nowrap"
-                  >
-                    <ArrowLeft size={18} />
-                    <span className="hidden sm:inline">Back to Categories</span>
-                  </button>
-                  <div className="relative w-full sm:w-auto sm:max-w-xs">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Search className="w-5 h-5 text-slate-400" />
-                    </div>
-                    <input
-                      type="text"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      placeholder="Search for a nominee..."
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg py-2 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                    />
-                  </div>
-                </div>
-              </header>
-              <main>
-                <div className="text-center bg-slate-900/50 backdrop-blur-md rounded-xl shadow-lg p-6 border border-slate-700 mt-6 mb-12">
-                  <h1 className="text-3xl sm:text-4xl font-bold tracking-tight bg-gradient-to-r from-amber-200 to-amber-500 bg-clip-text text-transparent">
-                    {mainCategories.find((mc) => mc.key === currentMainCategory)?.title}
-                  </h1>
-                  <p className="text-slate-400 mt-2 max-w-2xl mx-auto">
-                    Select one nominee for each available award below.
-                  </p>
-                </div>
-                <div className="space-y-12">
+            <div className="relative w-full sm:w-auto sm:max-w-xs flex-grow sm:flex-grow-0">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Search className="w-5 h-5 text-slate-400" />
+              </div>
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search for a nominee..."
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg py-2 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-amber-500 text-white"
+              />
+            </div>
+          </div>
+        </header>
+        <main>
+          <div className="text-center bg-slate-900/50 backdrop-blur-md rounded-xl shadow-lg p-6 border border-slate-700 mt-6 mb-12">
+            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight bg-gradient-to-r from-amber-200 to-amber-500 bg-clip-text text-transparent">
+              {organization.electionTitle} Ballot
+            </h1>
+            <p className="text-slate-400 mt-2 max-w-2xl mx-auto">
+              Welcome, <span className="font-semibold text-white">{fullName}</span>. Select one nominee for each available award below.
+            </p>
+          </div>
+          <div className="space-y-12">
                   {filteredCategories.map((category) => {
                     const isCategoryVoted = votedSubCategoryIds.includes(category.id);
                     return (
