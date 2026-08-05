@@ -35,6 +35,7 @@ interface NominationFormState {
   firstName: string;
   lastName: string;
   level: string; // academic level — required for Department Awards
+  mainCategory: string;
   subCategory: string;
   imageFile?: File;
   imagePreviewUrl?: string;
@@ -47,6 +48,7 @@ const emptyForm = (): NominationFormState => ({
   firstName: "",
   lastName: "",
   level: "",
+  mainCategory: "",
   subCategory: "",
 });
 
@@ -251,9 +253,8 @@ const NominationPage = () => {
     setNominationForms((forms) =>
       forms.map((form) => {
         if (form.id === id) {
-          if (name === "subCategory") {
-             // Reset level if they change award
-             return { ...form, subCategory: value, level: "" };
+          if (name === "mainCategory") {
+            return { ...form, mainCategory: value, subCategory: "", level: "" };
           }
           return { ...form, [name]: value };
         }
@@ -318,15 +319,11 @@ const NominationPage = () => {
         alert(`Please enter both first and last name for Nomination #${n}.`);
         return;
       }
-      if (!form.subCategory) {
-        alert(`Please select an award for Nomination #${n}.`);
+      if (!form.mainCategory || !form.subCategory) {
+        alert(`Please select a category and award for Nomination #${n}.`);
         return;
       }
-      
-      const selectedGroup = awardGroups.find(g => g.awards.some(a => a.id === form.subCategory));
-      const isDepartmentCategory = selectedGroup?.id.startsWith("department-");
-
-      if (isDepartmentCategory && !form.level) {
+      if (form.mainCategory === "department" && !form.level) {
         alert(`Please select the nominee's current level for Nomination #${n}.`);
         return;
       }
@@ -462,8 +459,18 @@ const NominationPage = () => {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           {nominationForms.map((form, formIndex) => {
-            const selectedGroup = awardGroups.find(g => g.awards.some(a => a.id === form.subCategory));
-            const isDepartmentCategory = selectedGroup?.id.startsWith("department-");
+            const standardGroups = awardGroups.filter(
+              (group) => !group.id.startsWith("department-"),
+            );
+            const departmentalGroups = awardGroups.filter((group) =>
+              group.id.startsWith("department-"),
+            );
+            const selectedGroups =
+              form.mainCategory === "departmental"
+                ? departmentalGroups
+                : standardGroups.filter((group) => group.id === form.mainCategory);
+
+            const isDepartmentCategory = form.mainCategory === "department";
 
             return (
               <div
@@ -513,8 +520,27 @@ const NominationPage = () => {
                   />
                 </div>
 
-                {/* ── Award Selection ── */}
+                {/* ── Category + Award ── */}
                 <div className="mt-4 grid grid-cols-1 gap-4">
+                  <SelectField
+                    label="Category"
+                    id={`main-category-${form.id}`}
+                    name="mainCategory"
+                    value={form.mainCategory}
+                    onChange={(e) => handleInputChange(form.id, e)}
+                    required
+                  >
+                    <option value="">Select a category</option>
+                    {standardGroups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.label}
+                      </option>
+                    ))}
+                    {departmentalGroups.length > 0 && (
+                      <option value="departmental">Departmental Awards</option>
+                    )}
+                  </SelectField>
+
                   <SelectField
                     label="Award"
                     id={`award-category-${form.id}`}
@@ -522,20 +548,31 @@ const NominationPage = () => {
                     value={form.subCategory}
                     onChange={(e) => handleInputChange(form.id, e)}
                     required
+                    disabled={!form.mainCategory}
                   >
-                    <option value="">Select an award</option>
-                    {awardGroups.map((group) => (
-                      <optgroup
-                        key={group.id}
-                        label={group.label}
-                      >
-                        {group.awards.map((award) => (
+                    <option value="">
+                      {form.mainCategory ? "Select an award" : "Select a category first"}
+                    </option>
+                    {selectedGroups.map((group) =>
+                      form.mainCategory === "departmental" ? (
+                        <optgroup
+                          key={group.id}
+                          label={group.label.replace("Departmental Awards - ", "")}
+                        >
+                          {group.awards.map((award) => (
+                            <option key={award.id} value={award.id}>
+                              {award.title}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ) : (
+                        group.awards.map((award) => (
                           <option key={award.id} value={award.id}>
                             {award.title}
                           </option>
-                        ))}
-                      </optgroup>
-                    ))}
+                        ))
+                      ),
+                    )}
                   </SelectField>
                 </div>
 
