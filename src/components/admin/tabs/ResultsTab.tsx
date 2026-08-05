@@ -2,6 +2,7 @@ import React from "react";
 import { Search, Trophy } from "lucide-react";
 import ResultsAccordion from "../ResultsAccordion";
 import type { CategoryResult } from "../../../types/admin";
+import { organization } from "../../../config/organization";
 
 interface ResultsTabProps {
   searchTerm: string;
@@ -46,26 +47,14 @@ const ResultsTab: React.FC<ResultsTabProps> = ({
       )}
 
       <div className="space-y-6">
-        <ResultsAccordion
-          title="Undergraduate Awards"
-          results={groupedAndFilteredResults.undergraduate}
-          getCategoryTitle={getCategoryTitle}
-        />
-        <ResultsAccordion
-          title="General Awards"
-          results={groupedAndFilteredResults.general}
-          getCategoryTitle={getCategoryTitle}
-        />
-        <ResultsAccordion
-          title="Finalist Awards"
-          results={groupedAndFilteredResults.finalist}
-          getCategoryTitle={getCategoryTitle}
-        />
-        <ResultsAccordion
-          title="Departmental Awards"
-          results={groupedAndFilteredResults.departmental}
-          getCategoryTitle={getCategoryTitle}
-        />
+        {Object.entries(organization.categoryGroups).map(([groupKey, label]) => (
+          <ResultsAccordion
+            key={groupKey}
+            title={label}
+            results={groupedAndFilteredResults[groupKey] || []}
+            getCategoryTitle={getCategoryTitle}
+          />
+        ))}
         {results.length > 0 &&
           Object.values(groupedAndFilteredResults).every(
             (arr) => arr.length === 0

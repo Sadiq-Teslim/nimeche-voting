@@ -43,6 +43,8 @@ export default {
     fontFamily: "'DM Sans', system-ui, sans-serif",
     displayFontFamily: "'DM Serif Display', Georgia, serif",
     portalMode: "nominations",
+    fixedDepartmentId: "nimeche",
+    voterRequiresDepartment: false,
     categoryGroups: {
       level: "Level-Specific Awards",
       department: "Department Awards",

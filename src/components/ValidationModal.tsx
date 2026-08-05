@@ -16,7 +16,7 @@ const ValidationModal: React.FC<ValidationModalProps> = ({
   onClose,
   onSuccess,
 }) => {
-  const [department, setDepartment] = useState("");
+  const [department, setDepartment] = useState(organization.fixedDepartmentId || "");
   const [fullName, setFullName] = useState("");
   const [departments, setDepartments] = useState<{ id: string; title: string }[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -24,6 +24,10 @@ const ValidationModal: React.FC<ValidationModalProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
+    if (!organization.voterRequiresDepartment && organization.fixedDepartmentId) {
+      setDepartment(organization.fixedDepartmentId);
+      return;
+    }
     api
       .get("/departments")
       .then((res) => setDepartments(res.data))
@@ -57,15 +61,13 @@ const ValidationModal: React.FC<ValidationModalProps> = ({
   }
 
   return (
-    // THEME CHANGE: Added backdrop-blur-md for a deeper frosted glass effect
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 backdrop-blur-md">
-      {/* THEME CHANGE: Added a div for the animated gradient border */}
-      <div className="relative p-[2px] rounded-2xl bg-gradient-to-br from-amber-400 via-gray-600 to-amber-500 max-w-md w-full">
-        <div className="bg-slate-900 rounded-xl p-8 w-full relative shadow-2xl">
+      <div className="relative max-w-md w-full rounded-lg border border-[#E8650A]/40 bg-[#0D160A] p-6 shadow-2xl sm:p-8">
           <button
             onClick={onClose}
-            className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"
+            className="absolute top-4 right-4 rounded-md p-1 text-[#7A9A7C] hover:bg-white/5 hover:text-white transition-colors"
             disabled={isLoading}
+            aria-label="Close voter verification"
           >
             <X size={24} />
           </button>
@@ -76,12 +78,11 @@ const ValidationModal: React.FC<ValidationModalProps> = ({
               alt="Event Logo"
               className="w-12 h-12 mx-auto mb-4"
             />
-            {/* THEME CHANGE: Gold gradient text for the title */}
-            <h2 className="text-3xl font-bold bg-gradient-to-r from-amber-200 to-amber-500 bg-clip-text text-transparent">
+            <h2 className="text-3xl font-bold text-[#F2EDE8]">
               Voter Verification
             </h2>
-            <p className="text-slate-400 mt-2">
-              Please enter your details for {organization.shortName}.
+            <p className="text-[#BDD0BE] mt-2">
+              Enter your name to open the official ballot.
             </p>
           </div>
 
@@ -90,7 +91,7 @@ const ValidationModal: React.FC<ValidationModalProps> = ({
               <div>
                 <label
                   htmlFor="fullName"
-                  className="block text-sm font-medium text-slate-300 mb-1"
+                  className="block text-sm font-medium text-[#BDD0BE] mb-1.5"
                 >
                   Full Name
                 </label>
@@ -100,14 +101,15 @@ const ValidationModal: React.FC<ValidationModalProps> = ({
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   required
-                  className="w-full bg-slate-800 border border-slate-600 rounded-md px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400"
+                  className="w-full bg-black/30 border border-[#E8650A]/35 rounded-md px-4 py-3 text-white placeholder:text-[#7A9A7C] focus:outline-none focus:ring-2 focus:ring-[#E8650A]/35 focus:border-[#E8650A]"
                   placeholder="Enter your full name"
                 />
               </div>
+              {organization.voterRequiresDepartment && (
               <div>
                 <label
                   htmlFor="department"
-                  className="block text-sm font-medium text-slate-300 mb-1"
+                  className="block text-sm font-medium text-[#BDD0BE] mb-1.5"
                 >
                   Department
                 </label>
@@ -116,7 +118,7 @@ const ValidationModal: React.FC<ValidationModalProps> = ({
                   value={department}
                   onChange={(e) => setDepartment(e.target.value)}
                   required
-                  className="w-full bg-slate-800 border border-slate-600 rounded-md px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400"
+                  className="w-full bg-black/30 border border-[#E8650A]/35 rounded-md px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-[#E8650A]/35 focus:border-[#E8650A]"
                 >
                   <option value="" disabled>Select your group</option>
                   {departments.map((item) => (
@@ -126,6 +128,7 @@ const ValidationModal: React.FC<ValidationModalProps> = ({
                   ))}
                 </select>
               </div>
+              )}
             </div>
 
             {error && (
@@ -135,11 +138,10 @@ const ValidationModal: React.FC<ValidationModalProps> = ({
             )}
 
             <div className="mt-6">
-              {/* THEME CHANGE: Gold button with hover effects */}
-              <button
+                <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-500 disabled:from-slate-600 disabled:to-slate-700 disabled:text-slate-400 disabled:cursor-not-allowed transition-all duration-300 text-black font-bold py-3 rounded-lg flex items-center justify-center gap-2"
+                className="w-full bg-[#E8650A] hover:bg-[#CF5A09] disabled:bg-[#4A5148] disabled:text-[#9AA899] disabled:cursor-not-allowed transition-colors text-white font-bold py-3 rounded-md flex items-center justify-center gap-2"
               >
                 {isLoading ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
@@ -148,7 +150,6 @@ const ValidationModal: React.FC<ValidationModalProps> = ({
               </button>
             </div>
           </form>
-        </div>
       </div>
     </div>
   );

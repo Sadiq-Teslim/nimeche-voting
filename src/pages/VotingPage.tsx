@@ -1,509 +1,356 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import ImageZoomModal from "../components/ImageZoomModal";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Redirect } from "wouter";
-import { generateFingerprint } from "../utils/fingerprint";
-import { retryWithBackoff } from "../utils/retry";
-import type { VoterInfo } from "../App";
+import { Check, CheckCircle2, ImageIcon, Loader2, Search, Send, ShieldCheck, Trophy } from "lucide-react";
+import ImageZoomModal from "../components/ImageZoomModal";
 import { api, assetUrl } from "../api/client";
 import { organization } from "../config/organization";
-import {
-  Check,
-  Loader2,
-  ArrowLeft,
-  ShieldCheck,
-  Search,
-  ChevronRight,
-  ChevronLeft,
-  ShoppingCart,
-} from "lucide-react";
+import type { VoterInfo } from "../App";
+import { generateFingerprint } from "../utils/fingerprint";
+import { retryWithBackoff } from "../utils/retry";
 
-// --- TypeScript Types ---
 export interface Nominee {
   id: string;
   name: string;
   image: string | null;
   description?: string;
 }
+
 export interface Category {
-  title: string;
   id: string;
+  title: string;
+  groupKey?: string;
   nominees: Nominee[];
 }
+
+interface BallotGroup {
+  id: string;
+  label: string;
+  categories: Category[];
+}
+
 type Selections = Record<string, string>;
 
-// --- CSRF token cache (Fix #5: avoid double round-trip) ---
+const brand = {
+  background: "#0A0D0A",
+  panel: "rgba(13, 22, 10, 0.9)",
+  panelStrong: "#0D160A",
+  orange: "#E8650A",
+  green: "#2E7D32",
+  gold: "#F5A623",
+  text: "#F2EDE8",
+  secondary: "#BDD0BE",
+  muted: "#7A9A7C",
+  border: "rgba(232, 101, 10, 0.3)",
+};
+
 let cachedCsrfToken: string | null = null;
+
 async function getCsrfToken(): Promise<string> {
   if (cachedCsrfToken) return cachedCsrfToken;
-  const res = await retryWithBackoff(() =>
-    api.get("/csrf-token")
-  );
-  cachedCsrfToken = res.data.csrfToken;
-  return cachedCsrfToken!;
+  const response = await retryWithBackoff(() => api.get("/csrf-token"));
+  cachedCsrfToken = response.data.csrfToken;
+  return cachedCsrfToken as string;
 }
 
 async function postVotesWithFreshCsrf(payload: unknown) {
   const csrfToken = await getCsrfToken();
   try {
     return await retryWithBackoff(() =>
-      api.post("/submit-votes", payload, {
-        headers: { "X-CSRF-Token": csrfToken },
-      })
+      api.post("/submit-votes", payload, { headers: { "X-CSRF-Token": csrfToken } }),
     );
-  } catch (err: any) {
-    if (err.response?.status !== 403) throw err;
+  } catch (error: any) {
+    if (error.response?.status !== 403) throw error;
     cachedCsrfToken = null;
     const freshToken = await getCsrfToken();
     return retryWithBackoff(() =>
-      api.post("/submit-votes", payload, {
-        headers: { "X-CSRF-Token": freshToken },
-      })
+      api.post("/submit-votes", payload, { headers: { "X-CSRF-Token": freshToken } }),
     );
   }
 }
 
-// --- Success Modal Component ---
-const SuccessModal = ({
-  isOpen,
-  onGoToHome,
-  message,
-}: {
-  isOpen: boolean;
-  onGoToHome: () => void;
-  message: string;
-}) => {
+const SuccessModal = ({ isOpen, message, onClose }: { isOpen: boolean; message: string; onClose: () => void }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-6 sm:p-8 max-w-md w-full text-center">
-        <ShieldCheck className="w-16 h-16 text-green-400 mx-auto mb-4" />
-        <h2 className="text-2xl font-bold text-white">Votes Recorded!</h2>
-        <p className="text-slate-300 mt-2 mb-8">{message}</p>
-        <div className="space-y-3">
-          <button
-            onClick={onGoToHome}
-            className="w-full bg-slate-800 hover:bg-slate-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors border border-slate-600"
-          >
-            Back to Categories Hub
-          </button>
-        </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
+      <div className="w-full max-w-md rounded-lg border p-6 text-center shadow-2xl sm:p-8" style={{ backgroundColor: brand.panelStrong, borderColor: brand.border }}>
+        <ShieldCheck className="mx-auto mb-4 h-14 w-14" style={{ color: brand.gold }} />
+        <h2 className="text-2xl font-bold" style={{ color: brand.text }}>Votes Recorded</h2>
+        <p className="mt-3 leading-6" style={{ color: brand.secondary }}>{message}</p>
+        <button type="button" onClick={onClose} className="mt-7 min-h-12 w-full rounded-md px-5 py-3 font-bold text-white" style={{ backgroundColor: brand.orange }}>
+          Return to Ballot
+        </button>
       </div>
     </div>
   );
 };
 
-// --- Nominee Carousel Component ---
-const NomineeCarousel = ({
-  category,
-  selections,
-  isCategoryVoted,
-  onSelectNominee,
-  onImageClick,
-}: {
-  category: Category;
-  selections: Selections;
-  isCategoryVoted: boolean;
-  onSelectNominee: (categoryId: string, candidateId: string) => void;
-  onImageClick: (nominee: Nominee) => void;
+const CandidateCard = ({ nominee, selected, disabled, onSelect, onImageClick }: {
+  nominee: Nominee;
+  selected: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+  onImageClick: () => void;
 }) => {
-  const scrollContainer = useRef<HTMLDivElement>(null);
-  const [showLeftArrow, setShowLeftArrow] = useState(false);
-  const [showRightArrow, setShowRightArrow] = useState(true);
-
-  const handleScroll = useCallback(() => {
-    if (scrollContainer.current) {
-      const { scrollLeft, scrollWidth, clientWidth } = scrollContainer.current;
-      setShowLeftArrow(scrollLeft > 1);
-      setShowRightArrow(scrollLeft < scrollWidth - clientWidth - 1);
-    }
-  }, []);
-
-  const scroll = (direction: "left" | "right") => {
-    if (scrollContainer.current) {
-      const scrollAmount = scrollContainer.current.clientWidth * 0.8;
-      scrollContainer.current.scrollBy({
-        left: direction === "left" ? -scrollAmount : scrollAmount,
-        behavior: "smooth",
-      });
-    }
-  };
-
-  useEffect(() => {
-    const container = scrollContainer.current;
-    if (!container) return;
-    const observer = new ResizeObserver(() => handleScroll());
-    observer.observe(container);
-    const timer = setTimeout(() => handleScroll(), 100);
-    return () => {
-      clearTimeout(timer);
-      observer.disconnect();
-    };
-  }, [category.nominees, handleScroll]);
+  const imageSrc = nominee.image
+    ? nominee.image.startsWith("http") ? nominee.image : `/nominees/${nominee.image}`
+    : "/placeholder.png";
 
   return (
-    <div className="relative">
-      <button
-        onClick={() => scroll("left")}
-        className="absolute -left-4 md:-left-6 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-slate-800/80 hover:bg-slate-700 border border-slate-600 flex items-center justify-center transition-opacity duration-300 disabled:opacity-0 disabled:cursor-default"
-        disabled={!showLeftArrow}
-      >
-        <ChevronLeft className="text-white" />
+    <article
+      className={`relative flex min-w-0 flex-col overflow-hidden rounded-lg border transition-colors ${disabled ? "opacity-65" : "hover:border-[#E8650A]"}`}
+      style={{ backgroundColor: selected ? "rgba(232, 101, 10, 0.12)" : brand.panel, borderColor: selected ? brand.orange : brand.border }}
+    >
+      <button type="button" onClick={onImageClick} disabled={!nominee.image} className="relative aspect-[4/3] w-full overflow-hidden bg-black/30 disabled:cursor-default" aria-label={nominee.image ? `View ${nominee.name}'s photo` : undefined}>
+        <img src={imageSrc} alt={nominee.name} className="h-full w-full object-cover" loading="lazy" decoding="async" />
+        {nominee.image && <span className="absolute bottom-2 right-2 rounded-full bg-black/70 p-2 text-white"><ImageIcon size={16} /></span>}
       </button>
-      <div
-        ref={scrollContainer}
-        onScroll={handleScroll}
-        className="flex items-stretch gap-4 sm:gap-5 overflow-x-auto snap-x snap-mandatory px-2 py-2 pb-4 custom-scrollbar"
-      >
-        {category.nominees.map((nominee) => {
-          const isSelected = selections[category.id] === nominee.id;
-          const imageSrc = nominee.image
-            ? nominee.image.startsWith("http")
-              ? nominee.image
-              : `/nominees/${nominee.image}`
-            : `/placeholder.png`;
-          return (
-            <div
-              key={nominee.id}
-              onClick={
-                isCategoryVoted
-                  ? undefined
-                  : () => onSelectNominee(category.id, nominee.id)
-              }
-              className={`snap-start w-36 sm:w-48 bg-slate-900/50 border rounded-xl p-3 text-center transition-all duration-300 relative group flex flex-col flex-shrink-0 ${
-                isCategoryVoted
-                  ? "cursor-not-allowed border-slate-700"
-                  : "cursor-pointer border-slate-700 hover:border-amber-400/50 hover:-translate-y-1"
-              } ${isSelected ? "border-amber-400 ring-2 ring-amber-400" : ""}`}
-            >
-              <div
-                className={`relative w-24 h-24 mx-auto rounded-full overflow-hidden border-4 shadow-sm mb-3 transition-colors flex-shrink-0 ${
-                  isSelected ? "border-amber-400" : "border-slate-600"
-                }`}
-              >
-                <img
-                  src={imageSrc}
-                  alt={nominee.name}
-                  className="w-full h-full object-cover"
-                  loading="lazy"
-                  decoding="async"
-                />
-                {nominee.image && (
-                  <div
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onImageClick(nominee);
-                    }}
-                    className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity cursor-zoom-in"
-                  />
-                )}
-              </div>
-              <div className="flex-grow flex flex-col justify-center">
-                <h3 className="font-bold text-white text-sm md:text-base group-hover:text-base whitespace-normal break-words min-h-[2.5rem]">
-                  {nominee.name}
-                </h3>
-                <p className="text-slate-400 text-xs h-4 mb-3">
-                  {nominee.description || ""}
-                </p>
-              </div>
-              <div
-                className={`w-full mt-auto py-2 px-3 rounded-lg font-semibold text-xs transition-all duration-300 flex items-center justify-center gap-2 border ${
-                  isSelected
-                    ? "bg-gradient-to-r from-amber-500 to-amber-400 text-black border-amber-400"
-                    : isCategoryVoted
-                    ? "bg-slate-700 text-slate-400 border-slate-600"
-                    : "bg-slate-800 text-slate-300 border-slate-600"
-                }`}
-              >
-                {isCategoryVoted ? (
-                  <><Check size={14} /> Voted</>
-                ) : isSelected ? (
-                  <><Check size={14} /> Selected</>
-                ) : (
-                  "Select"
-                )}
-              </div>
-            </div>
-          );
-        })}
+      <div className="flex flex-1 flex-col p-4">
+        <h3 className="break-words text-base font-bold" style={{ color: brand.text }}>{nominee.name}</h3>
+        {nominee.description && <p className="mt-1 text-sm leading-5" style={{ color: brand.muted }}>{nominee.description}</p>}
+        <button
+          type="button"
+          onClick={onSelect}
+          disabled={disabled}
+          className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-bold disabled:cursor-not-allowed"
+          style={{ backgroundColor: selected ? brand.orange : "rgba(0,0,0,0.28)", borderColor: selected ? brand.orange : brand.border, color: selected ? "white" : brand.secondary }}
+        >
+          {disabled ? <><Check size={16} /> Voted</> : selected ? <><CheckCircle2 size={16} /> Selected</> : "Select Nominee"}
+        </button>
       </div>
-      <button
-        onClick={() => scroll("right")}
-        className="absolute -right-4 md:-right-6 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-slate-800/80 hover:bg-slate-700 border border-slate-600 flex items-center justify-center transition-opacity duration-300 disabled:opacity-0 disabled:cursor-default"
-        disabled={!showRightArrow}
-      >
-        <ChevronRight className="text-white" />
-      </button>
-    </div>
+    </article>
   );
 };
 
-// --- Main Voting Page Component ---
 const VotingPage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
-  const { fullName, department } = voter;
-
   const [categories, setCategories] = useState<Category[]>([]);
-  const [votedSubCategoryIds, setVotedSubCategoryIds] = useState<string[]>([]);
+  const [votedCategoryIds, setVotedCategoryIds] = useState<string[]>([]);
   const [selections, setSelections] = useState<Selections>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
-  const [modalMessage, setModalMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [isSuccessOpen, setIsSuccessOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [zoomedNominee, setZoomedNominee] = useState<Nominee | null>(null);
   const fingerprintRef = useRef<string | null>(null);
 
-
-
   useEffect(() => {
     document.title = `${organization.electionTitle} | Voting`;
-    const fetchData = async () => {
+    const fetchBallot = async () => {
       setIsLoading(true);
+      setError(null);
       try {
-        const [structureRes, fp] = await Promise.all([
+        const [ballotResponse, fingerprint] = await Promise.all([
           retryWithBackoff(() => api.get("/ballot")),
           generateFingerprint(),
         ]);
-
-        fingerprintRef.current = fp;
-        const votedRes = await retryWithBackoff(() =>
-          api.get("/voted-categories", { params: { fingerprint: fp } })
-        );
-
-        const jsonData = structureRes.data;
-        let deptCats: Category[] = [];
-        const userDepartment = jsonData.departments.find(
-          (dept: any) => dept.id === department
-        );
-        if (userDepartment) {
-          const deptName = userDepartment.title.replace("Departmental Awards - ", "");
-          deptCats = userDepartment.subcategories.map((subCat: any) => ({
-            ...subCat,
-            title: `${deptName} - ${subCat.title}`,
-          }));
-        }
-        setCategories([...jsonData.categories, ...deptCats]);
-
-        // Use server-side cookie as source of truth for voted categories
-        setVotedSubCategoryIds(votedRes.data.votedCategoryIds || []);
+        fingerprintRef.current = fingerprint;
+        const votedResponse = await retryWithBackoff(() => api.get("/voted-categories", { params: { fingerprint } }));
+        const departmentCategories = (ballotResponse.data.departments || []).flatMap((department: any) => department.subcategories || []);
+        setCategories([...(ballotResponse.data.categories || []), ...departmentCategories]);
+        setVotedCategoryIds(votedResponse.data.votedCategoryIds || []);
       } catch {
-        setError("Could not load voting data. Please try refreshing.");
+        setError("Could not load the NIMECHE ballot. Please refresh and try again.");
       } finally {
         setIsLoading(false);
       }
     };
-    fetchData();
-  }, [department]);
+    fetchBallot();
+  }, []);
 
+  const ballotGroups = useMemo<BallotGroup[]>(() => {
+    const groupLabels = organization.categoryGroups || {};
+    const groups = new Map<string, Category[]>();
+    for (const category of categories) {
+      const groupKey = category.groupKey || "other";
+      const items = groups.get(groupKey) || [];
+      items.push(category);
+      groups.set(groupKey, items);
+    }
+    const configuredOrder = Object.keys(groupLabels);
+    return [...groups.entries()]
+      .sort(([left], [right]) => {
+        const leftIndex = configuredOrder.indexOf(left);
+        const rightIndex = configuredOrder.indexOf(right);
+        if (leftIndex === -1 && rightIndex === -1) return left.localeCompare(right);
+        if (leftIndex === -1) return 1;
+        if (rightIndex === -1) return -1;
+        return leftIndex - rightIndex;
+      })
+      .map(([id, groupedCategories]) => ({
+        id,
+        label: groupLabels[id] || `${id.charAt(0).toUpperCase()}${id.slice(1)} Awards`,
+        categories: groupedCategories,
+      }));
+  }, [categories]);
 
+  const filteredGroups = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
+    if (!query) return ballotGroups;
+    return ballotGroups
+      .map((group) => ({
+        ...group,
+        categories: group.categories.filter((category) =>
+          category.title.toLowerCase().includes(query) || category.nominees.some((nominee) => nominee.name.toLowerCase().includes(query)),
+        ),
+      }))
+      .filter((group) => group.categories.length > 0);
+  }, [ballotGroups, searchTerm]);
+
+  const availableCategoryCount = categories.filter((category) => category.nominees.length > 0).length;
+  const completedCount = categories.filter((category) => votedCategoryIds.includes(category.id)).length;
+  const selectionCount = Object.keys(selections).length;
 
   const handleSelectNominee = (categoryId: string, candidateId: string) => {
-    setSelections((prev) => ({ ...prev, [categoryId]: candidateId }));
+    if (votedCategoryIds.includes(categoryId)) return;
+    setSubmissionError(null);
+    setSelections((current) => ({ ...current, [categoryId]: candidateId }));
   };
 
-  // Submit votes — fingerprint + cookie, no email, immediate counting
   const handleSubmitVotes = async () => {
-    if (Object.keys(selections).length === 0 || isSubmitting) return;
+    if (selectionCount === 0 || isSubmitting) return;
     setIsSubmitting(true);
     setSubmissionError(null);
-
     try {
       const fingerprint = fingerprintRef.current || (await generateFingerprint());
       fingerprintRef.current = fingerprint;
-      const choices = Object.entries(selections).map(
-        ([categoryId, candidateId]) => ({ categoryId, candidateId })
-      );
-      const payload = {
+      const response = await postVotesWithFreshCsrf({
         fingerprint,
-        department,
-        choices,
-      };
-
-      const res = await postVotesWithFreshCsrf(payload);
-
-      // Server returns the authoritative list of voted category IDs
-      setVotedSubCategoryIds(res.data.votedCategoryIds || []);
+        department: organization.fixedDepartmentId || voter.department,
+        choices: Object.entries(selections).map(([categoryId, candidateId]) => ({ categoryId, candidateId })),
+      });
+      setVotedCategoryIds(response.data.votedCategoryIds || []);
       setSelections({});
-
-      const recordedCount = res.data.recorded?.length || 0;
-      const skippedCount = res.data.skipped?.length || 0;
-      if (skippedCount > 0 && recordedCount === 0) {
-        setModalMessage("You have already voted in all selected categories.");
-      } else if (skippedCount > 0) {
-        setModalMessage(`${recordedCount} vote(s) recorded. ${skippedCount} category(ies) were already voted in.`);
-      } else {
-        setModalMessage("Your votes have been recorded successfully. Thank you for voting!");
-      }
-      setIsSuccessModalOpen(true);
-    } catch (err: any) {
-      setSubmissionError(
-        err.response?.data?.message || "An error occurred. Please try again."
-      );
+      const recordedCount = response.data.recorded?.length || 0;
+      const skippedCount = response.data.skipped?.length || 0;
+      if (recordedCount === 0 && skippedCount > 0) setSuccessMessage("Those awards were already completed on this device.");
+      else if (skippedCount > 0) setSuccessMessage(`${recordedCount} vote(s) recorded. ${skippedCount} previously completed award(s) were skipped.`);
+      else setSuccessMessage(`${recordedCount} vote(s) recorded successfully.`);
+      setIsSuccessOpen(true);
+    } catch (submitError: any) {
+      setSubmissionError(submitError.response?.data?.message || "Votes could not be submitted. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const closeModalAndGoHome = () => {
-    setIsSuccessModalOpen(false);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  if (!voter.fullName) return <Redirect to="/" />;
+  const backgroundImage = organization.nominationBackground ? `url("${assetUrl(organization.nominationBackground)}")` : undefined;
 
-  const handleOpenZoomModal = (nominee: Nominee) => setZoomedNominee(nominee);
-  const handleCloseZoomModal = () => setZoomedNominee(null);
-
-  const filteredCategories = useMemo(() => {
-    if (!searchTerm.trim()) return categories;
-    const lowercasedSearchTerm = searchTerm.toLowerCase();
-    return categories.filter(
-      (category) =>
-        category.title.toLowerCase().includes(lowercasedSearchTerm) ||
-        category.nominees.some((nominee) =>
-          nominee.name.toLowerCase().includes(lowercasedSearchTerm)
-        )
-    );
-  }, [categories, searchTerm]);
-
-  if (!fullName) return <Redirect to="/" />;
-
-  if (isLoading)
-    return (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 backdrop-blur-md">
-        <div className="relative p-[2px] rounded-2xl bg-gradient-to-br from-amber-400/50 via-gray-800 to-amber-500/50">
-          <div className="bg-slate-900 rounded-xl p-8 w-full relative shadow-2xl text-center">
-            <img
-              src={assetUrl(organization.logo)}
-              alt="Loading"
-              className="w-16 h-16 mx-auto mb-6 animate-spin"
-              style={{ animationDuration: "3s" }}
-            />
-            <h2 className="text-2xl font-bold bg-gradient-to-r from-amber-200 to-amber-500 bg-clip-text text-transparent">
-              Preparing the Ballot
-            </h2>
-            <p className="text-slate-400 mt-2">Please wait a moment...</p>
-          </div>
-        </div>
+  if (isLoading) return (
+    <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden p-4" style={{ backgroundColor: brand.background }}>
+      <div aria-hidden="true" className="fixed inset-0 bg-cover bg-center opacity-25" style={{ backgroundImage }} />
+      <div className="relative z-10 text-center">
+        <Loader2 className="mx-auto h-10 w-10 animate-spin" style={{ color: brand.orange }} />
+        <h1 className="mt-5 text-2xl font-bold" style={{ color: brand.text }}>Preparing Your Ballot</h1>
+        <p className="mt-2" style={{ color: brand.secondary }}>Loading approved nominees...</p>
       </div>
-    );
-  if (error)
-    return (
-      <div
-        className="flex items-center justify-center p-4"
-        style={{ backgroundImage: "url('/ornate_frame_bg.jpg')" }}
-      >
-        <div className="p-6 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-center shadow-md">
-          <h3 className="font-bold text-lg mb-2">An Error Occurred</h3>
-          <p>{error}</p>
-        </div>
+    </div>
+  );
+
+  if (error) return (
+    <div className="flex min-h-screen w-full items-center justify-center p-4" style={{ backgroundColor: brand.background }}>
+      <div className="max-w-md rounded-lg border border-red-400/30 bg-red-950/40 p-6 text-center text-red-200">
+        <h1 className="text-xl font-bold">Ballot Unavailable</h1>
+        <p className="mt-2">{error}</p>
       </div>
-    );
-  const selectionCount = Object.keys(selections).length;
+    </div>
+  );
+
   return (
-    <div
-      className="min-h-screen w-full bg-black relative overflow-hidden bg-cover bg-center bg-fixed"
-      style={{ backgroundColor: organization.colors.background }}
-    >
-      <div className="absolute inset-0 bg-black/80 backdrop-blur-md"></div>
+    <div className="relative min-h-screen w-full overflow-x-hidden pb-32" style={{ backgroundColor: brand.background }}>
+      <div aria-hidden="true" className="fixed inset-0 bg-cover bg-center bg-no-repeat opacity-20" style={{ backgroundImage }} />
+      <div aria-hidden="true" className="fixed inset-0 bg-[rgba(10,13,10,0.88)]" />
+      <SuccessModal isOpen={isSuccessOpen} message={successMessage} onClose={() => { setIsSuccessOpen(false); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
+      <ImageZoomModal nominee={zoomedNominee} onClose={() => setZoomedNominee(null)} />
 
-      <SuccessModal
-        isOpen={isSuccessModalOpen}
-        onGoToHome={closeModalAndGoHome}
-        message={modalMessage}
-      />
-
-      <ImageZoomModal nominee={zoomedNominee} onClose={handleCloseZoomModal} />
-
-      <div className="relative z-10 max-w-7xl mx-auto p-4 sm:p-8 w-full pt-24 sm:pt-20 pb-64">
-        <header className="fixed top-0 left-0 right-0 z-30 bg-black/30 backdrop-blur-md border-b border-slate-800">
-          <div className="max-w-7xl mx-auto p-4 flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <img src={assetUrl(organization.logo)} alt="Logo" className="w-8 h-8 object-contain" />
-              <h1 className="text-xl font-bold text-white hidden sm:block">{organization.electionTitle} {organization.year}</h1>
-            </div>
-            <div className="relative w-full sm:w-auto sm:max-w-xs flex-grow sm:flex-grow-0">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Search className="w-5 h-5 text-slate-400" />
-              </div>
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search for a nominee..."
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg py-2 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-amber-500 text-white"
-              />
+      <header className="sticky top-0 z-30 border-b bg-[#0A0D0A]/95 backdrop-blur-md" style={{ borderColor: brand.border }}>
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <img src={assetUrl(organization.logo)} alt="" className="h-10 w-10 shrink-0 object-contain" />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold" style={{ color: brand.text }}>{organization.shortName}</p>
+              <p className="text-xs" style={{ color: brand.muted }}>Official 2026 ballot</p>
             </div>
           </div>
-        </header>
-        <main>
-          <div className="text-center bg-slate-900/50 backdrop-blur-md rounded-xl shadow-lg p-6 border border-slate-700 mt-6 mb-12">
-            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight bg-gradient-to-r from-amber-200 to-amber-500 bg-clip-text text-transparent">
-              {organization.electionTitle} Ballot
-            </h1>
-            <p className="text-slate-400 mt-2 max-w-2xl mx-auto">
-              Welcome, <span className="font-semibold text-white">{fullName}</span>. Select one nominee for each available award below.
-            </p>
+          <label className="relative block w-full sm:max-w-sm">
+            <span className="sr-only">Search awards or nominees</span>
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2" style={{ color: brand.muted }} />
+            <input type="search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Search awards or nominees" className="min-h-11 w-full rounded-md border bg-black/30 py-2 pl-10 pr-3 text-sm outline-none focus:ring-2 focus:ring-[#E8650A]/35" style={{ borderColor: brand.border, color: brand.text }} />
+          </label>
+        </div>
+      </header>
+
+      <main className="relative z-10 mx-auto w-full max-w-7xl px-4 py-8 sm:px-8 sm:py-12">
+        <section className="border-b pb-8" style={{ borderColor: brand.border }}>
+          <p className="text-xs font-bold uppercase tracking-[0.18em]" style={{ color: brand.gold }}>Voting Portal</p>
+          <h1 className="mt-3 text-3xl font-bold sm:text-5xl" style={{ color: brand.text }}>Choose Your Award Winners</h1>
+          <p className="mt-3 max-w-2xl leading-7" style={{ color: brand.secondary }}>
+            Welcome, <span className="font-bold" style={{ color: brand.text }}>{voter.fullName}</span>. Select one nominee in any available award and submit when ready.
+          </p>
+          <div className="mt-6 flex flex-wrap gap-3 text-sm">
+            <span className="rounded-md border px-3 py-2" style={{ borderColor: brand.border, color: brand.secondary }}>{availableCategoryCount} awards with nominees</span>
+            <span className="rounded-md border px-3 py-2" style={{ borderColor: brand.border, color: brand.secondary }}>{completedCount} completed on this device</span>
           </div>
-          <div className="space-y-12">
-                  {filteredCategories.map((category) => {
-                    const isCategoryVoted = votedSubCategoryIds.includes(category.id);
+        </section>
+
+        {filteredGroups.length > 0 ? (
+          <div className="mt-10 space-y-14">
+            {filteredGroups.map((group) => (
+              <section key={group.id} aria-labelledby={`group-${group.id}`}>
+                <div className="mb-6 flex items-end justify-between gap-4 border-b pb-4" style={{ borderColor: brand.border }}>
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.16em]" style={{ color: brand.orange }}>{group.categories.length} awards</p>
+                    <h2 id={`group-${group.id}`} className="mt-1 text-2xl font-bold sm:text-3xl" style={{ color: brand.text }}>{group.label}</h2>
+                  </div>
+                  <Trophy className="h-7 w-7 shrink-0" style={{ color: brand.gold }} />
+                </div>
+                <div className="space-y-8">
+                  {group.categories.map((category) => {
+                    const voted = votedCategoryIds.includes(category.id);
                     return (
-                      <section
-                        key={category.id}
-                        className={`transition-opacity ${isCategoryVoted ? "opacity-60" : ""}`}
-                      >
-                        <div className="text-center mb-6 relative">
-                          <h2 className="text-2xl font-bold text-white">{category.title}</h2>
-                          {isCategoryVoted && (
-                            <p className="text-sm font-semibold text-amber-400 mt-1">
-                              You have already voted in this award
-                            </p>
-                          )}
+                      <article key={category.id} className="rounded-lg border p-4 sm:p-6" style={{ backgroundColor: "rgba(8,14,7,0.72)", borderColor: brand.border }}>
+                        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <h3 className="text-xl font-bold" style={{ color: brand.text }}>{category.title}</h3>
+                            <p className="mt-1 text-sm" style={{ color: brand.muted }}>{voted ? "Voting completed on this device" : `${category.nominees.length} approved nominee${category.nominees.length === 1 ? "" : "s"}`}</p>
+                          </div>
+                          {voted && <span className="inline-flex items-center gap-1.5 rounded-md bg-[#2E7D32]/20 px-3 py-1.5 text-xs font-bold text-green-300"><Check size={15} /> Completed</span>}
                         </div>
-                        <NomineeCarousel
-                          category={category}
-                          selections={selections}
-                          isCategoryVoted={isCategoryVoted}
-                          onSelectNominee={handleSelectNominee}
-                          onImageClick={handleOpenZoomModal}
-                        />
-                      </section>
+                        {category.nominees.length > 0 ? (
+                          <div className="grid grid-cols-1 gap-4 min-[480px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                            {category.nominees.map((nominee) => (
+                              <CandidateCard key={nominee.id} nominee={nominee} selected={selections[category.id] === nominee.id} disabled={voted} onSelect={() => handleSelectNominee(category.id, nominee.id)} onImageClick={() => nominee.image && setZoomedNominee(nominee)} />
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="rounded-md border border-dashed px-4 py-8 text-center" style={{ borderColor: brand.border, color: brand.muted }}>No approved nominees yet.</div>
+                        )}
+                      </article>
                     );
                   })}
-                  {filteredCategories.length === 0 && searchTerm && (
-                    <div className="text-center py-16">
-                      <p className="text-slate-400 text-lg">No results found for "{searchTerm}".</p>
-                    </div>
-                  )}
                 </div>
-              </main>
-            </>
-          )
-        )}
-      </div>
-      <footer className="fixed bottom-0 left-0 right-0 z-20 bg-black/50 backdrop-blur-md border-t border-white/10 p-4 transition-transform duration-300">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-          <div className="text-left">
-            <h3 className="font-bold text-white">Your Ballot</h3>
-            <p className="text-sm text-amber-300">{selectionCount} vote(s) selected.</p>
-            {submissionError && (
-              <p className="text-xs text-red-400 mt-1">{submissionError}</p>
-            )}
+              </section>
+            ))}
           </div>
-          <button
-            onClick={handleSubmitVotes}
-            disabled={selectionCount === 0 || isSubmitting}
-            className="group w-auto bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-500 transition-all duration-300 text-black font-bold text-base py-3 px-6 sm:px-10 rounded-lg shadow-lg shadow-amber-500/10 disabled:from-slate-600 disabled:to-slate-700 disabled:text-slate-400 disabled:cursor-not-allowed flex items-center justify-center gap-2.5"
-          >
-            {isSubmitting ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : (
-              <ShoppingCart className="w-5 h-5" />
-            )}
-            <span>
-              {isSubmitting ? "Submitting..." : `Submit ${selectionCount} Vote(s)`}
-            </span>
+        ) : (
+          <div className="py-20 text-center" style={{ color: brand.muted }}>No awards or nominees match “{searchTerm}”.</div>
+        )}
+      </main>
+
+      <footer className="fixed bottom-0 left-0 right-0 z-30 border-t bg-[#0A0D0A]/95 p-3 backdrop-blur-md sm:p-4" style={{ borderColor: brand.border }}>
+        <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-bold" style={{ color: brand.text }}>Your Ballot</p>
+            <p className="truncate text-xs sm:text-sm" style={{ color: brand.gold }}>{selectionCount} vote(s) selected</p>
+            {submissionError && <p className="mt-1 max-w-xl text-xs text-red-300">{submissionError}</p>}
+          </div>
+          <button type="button" onClick={handleSubmitVotes} disabled={selectionCount === 0 || isSubmitting} className="flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-md px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-45 sm:px-7 sm:text-base" style={{ backgroundColor: selectionCount > 0 ? brand.orange : "#4A5148" }}>
+            {isSubmitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+            <span className="hidden sm:inline">{isSubmitting ? "Submitting..." : `Submit ${selectionCount} Vote(s)`}</span>
+            <span className="sm:hidden">{isSubmitting ? "Sending" : `Submit ${selectionCount}`}</span>
           </button>
         </div>
       </footer>

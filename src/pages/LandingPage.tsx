@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import ValidationModal from "../components/ValidationModal";
@@ -200,12 +199,12 @@ const LandingPage: React.FC<LandingPageProps> = ({ setVoter }) => {
           >
             <Star className="h-6 w-6 shrink-0" style={{ color: brand.gold }} />
             <div className="text-left">
-              <h2 className="text-sm font-semibold" style={{ color: brand.textPrimary }}>
-                Committee Reviewed
-              </h2>
-              <p className="mt-0.5 text-xs" style={{ color: brand.textMuted }}>
-                Every submission is carefully vetted
-              </p>
+                <h2 className="text-sm font-semibold" style={{ color: brand.textPrimary }}>
+                  {isNominationPortal ? "Committee Reviewed" : "One Device, One Vote"}
+                </h2>
+                <p className="mt-0.5 text-xs" style={{ color: brand.textMuted }}>
+                  {isNominationPortal ? "Every submission is carefully vetted" : "One final choice per award"}
+                </p>
             </div>
           </div>
         </div>

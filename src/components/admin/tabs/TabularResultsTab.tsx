@@ -2,6 +2,7 @@ import React from "react";
 import { Search, Trophy } from "lucide-react";
 import TabularAccordion from "../TabularAccordion";
 import type { CategoryResult } from "../../../types/admin";
+import { organization } from "../../../config/organization";
 
 interface TabularResultsTabProps {
   searchTerm: string;
@@ -46,26 +47,14 @@ const TabularResultsTab: React.FC<TabularResultsTabProps> = ({
       )}
 
       <div className="space-y-6">
-        <TabularAccordion
-          title="Undergraduate Awards"
-          results={groupedAndFilteredResults.undergraduate}
-          getCategoryTitle={getCategoryTitle}
-        />
-        <TabularAccordion
-          title="General Awards"
-          results={groupedAndFilteredResults.general}
-          getCategoryTitle={getCategoryTitle}
-        />
-        <TabularAccordion
-          title="Finalist Awards"
-          results={groupedAndFilteredResults.finalist}
-          getCategoryTitle={getCategoryTitle}
-        />
-        <TabularAccordion
-          title="Departmental Awards"
-          results={groupedAndFilteredResults.departmental}
-          getCategoryTitle={getCategoryTitle}
-        />
+        {Object.entries(organization.categoryGroups).map(([groupKey, label]) => (
+          <TabularAccordion
+            key={groupKey}
+            title={label}
+            results={groupedAndFilteredResults[groupKey] || []}
+            getCategoryTitle={getCategoryTitle}
+          />
+        ))}
 
         {results.length > 0 &&
           Object.values(groupedAndFilteredResults).every(

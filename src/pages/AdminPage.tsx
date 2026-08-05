@@ -75,12 +75,7 @@ const AdminPage = () => {
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
 
   // Define group titles for the PDF
-  const groupTitles: Record<keyof typeof groupedAndFilteredResults, string> = {
-    undergraduate: "Undergraduate Awards",
-    general: "General Awards",
-    finalist: "Finalist Awards",
-    departmental: "Departmental Awards",
-  };
+  const groupTitles: Record<string, string> = organization.categoryGroups;
 
   // --- Check for persisted JWT session on mount ---
   useEffect(() => {
@@ -346,19 +341,16 @@ const AdminPage = () => {
         .toLowerCase()
         .includes(searchTerm.toLowerCase())
     );
-    const grouped = {
-      undergraduate: [],
-      general: [],
-      finalist: [],
-      departmental: [],
-    } as Record<string, CategoryResult[]>;
+    const grouped = Object.fromEntries(
+      Object.keys(organization.categoryGroups).map((groupKey) => [groupKey, [] as CategoryResult[]]),
+    ) as Record<string, CategoryResult[]>;
     for (const result of filtered) {
       const positionGroup = setupPositions.find((position) => position.id === result.category)?.groupKey;
       if (positionGroup && grouped[positionGroup]) grouped[positionGroup].push(result);
-      else if (result.category.startsWith("ug-")) grouped.undergraduate.push(result);
-      else if (result.category.startsWith("gen-")) grouped.general.push(result);
-      else if (result.category.startsWith("fin-")) grouped.finalist.push(result);
-      else grouped.departmental.push(result);
+      else {
+        const fallbackGroup = Object.keys(grouped)[0];
+        if (fallbackGroup) grouped[fallbackGroup].push(result);
+      }
     }
     return grouped;
   }, [results, searchTerm, getCategoryTitle, setupPositions]);

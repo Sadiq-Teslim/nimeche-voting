@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Plus, Save, Trash2 } from "lucide-react";
 import type { CandidateSetup, DepartmentInfo, ElectionSetup, PositionSetup } from "../../../types/admin";
+import { organization } from "../../../config/organization";
 
 interface SetupTabProps {
   election: ElectionSetup | null;
@@ -19,7 +20,7 @@ interface SetupTabProps {
 const emptyPosition: PositionSetup = {
   id: "",
   title: "",
-  groupKey: "departmental",
+  groupKey: Object.keys(organization.categoryGroups)[0] || "general",
   departmentId: "",
   sortOrder: 0,
 };
@@ -170,11 +171,9 @@ const SetupTab: React.FC<SetupTabProps> = ({
               onChange={(e) => setPositionForm((prev) => ({ ...prev, groupKey: e.target.value as PositionSetup["groupKey"] }))}
               className="w-full bg-slate-900 border border-slate-700 rounded-md p-2"
             >
-              <option value="departmental">Departmental</option>
-              <option value="general">General</option>
-              <option value="undergraduate">Undergraduate</option>
-              <option value="graduate">Graduate</option>
-              <option value="finalist">Finalist</option>
+              {Object.entries(organization.categoryGroups).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
             </select>
             <select
               value={positionForm.departmentId || ""}
