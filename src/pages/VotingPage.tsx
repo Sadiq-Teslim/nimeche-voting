@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Redirect } from "wouter";
-import { Check, CheckCircle2, ImageIcon, Loader2, Search, Send, ShieldCheck, Trophy } from "lucide-react";
+import { Link, Redirect } from "wouter";
+import { ArrowLeft, Check, CheckCircle2, ImageIcon, Loader2, Search, Send, ShieldCheck, Trophy } from "lucide-react";
 import ImageZoomModal from "../components/ImageZoomModal";
 import { api, assetUrl } from "../api/client";
 import { organization } from "../config/organization";
@@ -122,7 +122,7 @@ const CandidateCard = ({ nominee, selected, disabled, onSelect, onImageClick }: 
   );
 };
 
-const VotingPage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
+const VotingPage: React.FC<{ voter: VoterInfo; groupKey: string }> = ({ voter, groupKey }) => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [votedCategoryIds, setVotedCategoryIds] = useState<string[]>([]);
   const [selections, setSelections] = useState<Selections>({});
@@ -137,7 +137,8 @@ const VotingPage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
   const fingerprintRef = useRef<string | null>(null);
 
   useEffect(() => {
-    document.title = `${organization.electionTitle} | Voting`;
+    const groupLabel = organization.categoryGroups[groupKey as keyof typeof organization.categoryGroups];
+    document.title = `${groupLabel || organization.electionTitle} | Voting`;
     const fetchBallot = async () => {
       setIsLoading(true);
       setError(null);
@@ -152,18 +153,18 @@ const VotingPage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
         setCategories([...(ballotResponse.data.categories || []), ...departmentCategories]);
         setVotedCategoryIds(votedResponse.data.votedCategoryIds || []);
       } catch {
-        setError("Could not load the NIMECHE ballot. Please refresh and try again.");
+        setError("Could not load the NIMechE ballot. Please refresh and try again.");
       } finally {
         setIsLoading(false);
       }
     };
     fetchBallot();
-  }, []);
+  }, [groupKey]);
 
   const ballotGroups = useMemo<BallotGroup[]>(() => {
     const groupLabels = organization.categoryGroups || {};
     const groups = new Map<string, Category[]>();
-    for (const category of categories) {
+    for (const category of categories.filter((item) => item.groupKey === groupKey)) {
       const groupKey = category.groupKey || "other";
       const items = groups.get(groupKey) || [];
       items.push(category);
@@ -184,7 +185,7 @@ const VotingPage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
         label: groupLabels[id] || `${id.charAt(0).toUpperCase()}${id.slice(1)} Awards`,
         categories: groupedCategories,
       }));
-  }, [categories]);
+  }, [categories, groupKey]);
 
   const filteredGroups = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -199,8 +200,9 @@ const VotingPage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
       .filter((group) => group.categories.length > 0);
   }, [ballotGroups, searchTerm]);
 
-  const availableCategoryCount = categories.filter((category) => category.nominees.length > 0).length;
-  const completedCount = categories.filter((category) => votedCategoryIds.includes(category.id)).length;
+  const visibleCategories = categories.filter((category) => category.groupKey === groupKey);
+  const availableCategoryCount = visibleCategories.filter((category) => category.nominees.length > 0).length;
+  const completedCount = visibleCategories.filter((category) => votedCategoryIds.includes(category.id)).length;
   const selectionCount = Object.keys(selections).length;
 
   const handleSelectNominee = (categoryId: string, candidateId: string) => {
@@ -237,6 +239,8 @@ const VotingPage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
   };
 
   if (!voter.fullName) return <Redirect to="/" />;
+  if (!(groupKey in organization.categoryGroups)) return <Redirect to="/vote" />;
+  const currentGroupLabel = organization.categoryGroups[groupKey as keyof typeof organization.categoryGroups];
   const backgroundImage = organization.nominationBackground ? `url("${assetUrl(organization.nominationBackground)}")` : undefined;
 
   if (isLoading) return (
@@ -269,10 +273,13 @@ const VotingPage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
       <header className="sticky top-0 z-30 border-b bg-[#0A0D0A]/95 backdrop-blur-md" style={{ borderColor: brand.border }}>
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-8">
           <div className="flex min-w-0 items-center gap-3">
+            <Link href="/vote" aria-label="Back to voting categories" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors hover:bg-white/5" style={{ borderColor: brand.border, color: brand.secondary }}>
+              <ArrowLeft size={19} />
+            </Link>
             <img src={assetUrl(organization.logo)} alt="" className="h-10 w-10 shrink-0 object-contain" />
             <div className="min-w-0">
               <p className="truncate text-sm font-bold" style={{ color: brand.text }}>{organization.shortName}</p>
-              <p className="text-xs" style={{ color: brand.muted }}>Official 2026 ballot</p>
+              <p className="truncate text-xs" style={{ color: brand.muted }}>{currentGroupLabel}</p>
             </div>
           </div>
           <label className="relative block w-full sm:max-w-sm">
@@ -285,10 +292,11 @@ const VotingPage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
 
       <main className="relative z-10 mx-auto w-full max-w-7xl px-4 py-8 sm:px-8 sm:py-12">
         <section className="border-b pb-8" style={{ borderColor: brand.border }}>
-          <p className="text-xs font-bold uppercase tracking-[0.18em]" style={{ color: brand.gold }}>Voting Portal</p>
-          <h1 className="mt-3 text-3xl font-bold sm:text-5xl" style={{ color: brand.text }}>Choose Your Award Winners</h1>
+          <Link href="/vote" className="inline-flex items-center gap-2 text-sm font-bold" style={{ color: brand.gold }}><ArrowLeft size={17} /> All voting categories</Link>
+          <p className="mt-6 text-xs font-bold uppercase tracking-[0.18em]" style={{ color: brand.orange }}>Official Ballot</p>
+          <h1 className="mt-3 text-3xl font-bold sm:text-5xl" style={{ color: brand.text }}>{currentGroupLabel}</h1>
           <p className="mt-3 max-w-2xl leading-7" style={{ color: brand.secondary }}>
-            Welcome, <span className="font-bold" style={{ color: brand.text }}>{voter.fullName}</span>. Select one nominee in any available award and submit when ready.
+            Welcome, <span className="font-bold" style={{ color: brand.text }}>{voter.fullName}</span>. Select one nominee for each award you want to complete, then submit this ballot.
           </p>
           <div className="mt-6 flex flex-wrap gap-3 text-sm">
             <span className="rounded-md border px-3 py-2" style={{ borderColor: brand.border, color: brand.secondary }}>{availableCategoryCount} awards with nominees</span>

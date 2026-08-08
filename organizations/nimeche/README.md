@@ -1,6 +1,6 @@
-# NIMECHE UNILAG SF
+# NIMechE UNILAG SF
 
-Put NIMECHE UNILAG SF brand assets in `assets/`.
+Put NIMechE UNILAG SF brand assets in `assets/`.
 
 Recommended filenames:
 

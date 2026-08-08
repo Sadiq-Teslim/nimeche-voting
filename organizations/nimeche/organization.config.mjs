@@ -31,9 +31,9 @@ const allAwards = [...levelAwards, ...departmentAwards];
 export default {
   id: "nimeche",
   public: {
-    name: "NIMECHE UNILAG SF Awards Night",
-    shortName: "NIMECHE UNILAG SF",
-    electionTitle: "NIMECHE UNILAG SF Awards Night",
+    name: "NIMechE UNILAG SYMPOSIUM 3.0 AWARDS NIGHT",
+    shortName: "NIMechE UNILAG SF",
+    electionTitle: "NIMechE UNILAG SYMPOSIUM 3.0 AWARDS NIGHT",
     year: "2026",
     logo: "/brand/logo.png",
     favicon: "/brand/logo.png",
@@ -67,13 +67,13 @@ export default {
   },
   seed: {
     election: {
-      title: "NIMECHE UNILAG SF Awards Night",
+      title: "NIMechE UNILAG SYMPOSIUM 3.0 AWARDS NIGHT",
       year: "2026",
       status: "closed",
       portalMode: "nominations",
     },
     departments: [
-      { id: "nimeche", title: "NIMECHE UNILAG SF", sortOrder: 1 },
+      { id: "nimeche", title: "NIMechE UNILAG SF", sortOrder: 1 },
     ],
     positions: allAwards.map(([id, title, groupKey], index) => ({
       id,

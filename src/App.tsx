@@ -3,6 +3,7 @@ import { Suspense, lazy, useState, useEffect } from "react";
 import { Switch, Route, Redirect } from "wouter";
 import LandingPage from "./pages/LandingPage";
 import VotingPage from "./pages/VotingPage";
+import VotingWelcomePage from "./pages/VotingWelcomePage";
 import NominationPage from "./pages/NominationPage";
 import { organization } from "./config/organization";
 
@@ -89,8 +90,12 @@ function App() {
           <LandingPage setVoter={setVoter} />
         </Route>
 
+        <Route path="/vote/:groupKey">
+          {(params) => voter ? <VotingPage voter={voter} groupKey={params.groupKey} /> : <Redirect to="/" />}
+        </Route>
+
         <Route path="/vote">
-          {voter ? <VotingPage voter={voter} /> : <Redirect to="/" />}
+          {voter ? <VotingWelcomePage voter={voter} /> : <Redirect to="/" />}
         </Route>
 
         <Route path="/nominate" component={NominationPage} />

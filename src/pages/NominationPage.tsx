@@ -52,7 +52,7 @@ const emptyForm = (): NominationFormState => ({
   subCategory: "",
 });
 
-// ── colour tokens (NIMECHE brand) ────────────────────────────────────────────
+// ── colour tokens (NIMechE brand) ────────────────────────────────────────────
 const c = {
   bg: "#0A0D0A",
   card: "rgba(13,22,10,0.92)",
@@ -173,7 +173,7 @@ const NominationPage = () => {
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
 
-  // NIMECHE nomination background image layer
+  // NIMechE nomination background image layer
   const pageBackdrop = (
     <>
       {organization.nominationBackground && (
