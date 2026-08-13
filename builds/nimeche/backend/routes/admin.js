@@ -36,7 +36,7 @@ router.post('/results', async (req, res) => {
     }
 })
 
-// --- Pending nominations (paginated by complete award category) ---
+// --- Nominations (20 award categories, paginated as complete groups) ---
 router.post('/pending-nominations', async (req, res) => {
     try {
         const page = Math.max(1, parseInt(req.body.page) || 1)
@@ -45,20 +45,33 @@ router.post('/pending-nominations', async (req, res) => {
         const search = typeof req.body.search === 'string' ? req.body.search.trim().slice(0, 100) : ''
         const searchPattern = `%${search}%`
 
-        const [pending, total] = await Promise.all([
+        const [categoryRows, total] = await Promise.all([
             query(
-                `with filtered as (
-                    select n.*, p.title as category_title,
-                           coalesce(p.sort_order, 2147483647) as category_sort
-                    from nominations n
-                    left join positions p on p.id = n.position_id and p.organization_id = n.organization_id
-                    where n.organization_id = $1
-                      and n.status = 'pending'
-                      and ($2 = '' or n.full_name ilike $3 or coalesce(n.popular_name, '') ilike $3 or coalesce(p.title, '') ilike $3)
+                `with matching_categories as (
+                    select p.id, p.title, p.sort_order
+                    from positions p
+                    where p.organization_id = $1
+                      and (
+                          $2 = ''
+                          or p.title ilike $3
+                          or exists (
+                              select 1
+                              from nominations n
+                              where n.organization_id = p.organization_id
+                                and n.position_id = p.id
+                                and (n.full_name ilike $3 or coalesce(n.popular_name, '') ilike $3)
+                          )
+                      )
                 ),
-                grouped as (
+                category_page as (
+                    select id, title, sort_order
+                    from matching_categories
+                    order by sort_order, title, id
+                    offset $4 limit $5
+                ),
+                grouped_nominees as (
                     select
-                        (array_agg(n.id order by n.submitted_at desc))[1] as id,
+                        (array_agg(n.id order by (n.status = 'pending') desc, n.submitted_at desc))[1] as id,
                         array_agg(n.id order by n.submitted_at desc) as "nominationIds",
                         (array_agg(n.full_name order by n.submitted_at desc))[1] as "fullName",
                         max(n.popular_name) as "popularName",
@@ -66,49 +79,114 @@ router.post('/pending-nominations', async (req, res) => {
                         max(n.image_url) as "imageUrl",
                         max(n.submitted_at) as "submittedAt",
                         count(*)::int as "nominationCount",
-                        max(n.category_title) as "categoryTitle",
-                        min(n.category_sort) as "categorySort"
-                    from filtered n
+                        count(*) filter (where n.status = 'approved')::int as "approvedCount",
+                        count(*) filter (where n.status = 'pending')::int as "pendingCount",
+                        count(*) filter (where n.status = 'rejected')::int as "rejectedCount"
+                    from nominations n
+                    join category_page cp on cp.id = n.position_id
+                    where n.organization_id = $1
+                      and (
+                          $2 = ''
+                          or cp.title ilike $3
+                          or n.full_name ilike $3
+                          or coalesce(n.popular_name, '') ilike $3
+                      )
                     group by n.election_id, n.position_id,
                              lower(regexp_replace(trim(n.full_name), '\\s+', ' ', 'g'))
-                ),
-                category_page as (
-                    select category, min("categorySort") as sort_order,
-                           max("categoryTitle") as title
-                    from grouped
-                    group by category
-                    order by sort_order, title, category
-                    offset $4 limit $5
                 )
-                select grouped.*
-                from grouped
-                join category_page on category_page.category = grouped.category
-                order by category_page.sort_order, category_page.title,
-                         grouped."submittedAt" desc, grouped."fullName"`,
+                select
+                    cp.id as category,
+                    cp.title as "categoryTitle",
+                    cp.sort_order as "categorySort",
+                    gn.id,
+                    gn."nominationIds",
+                    gn."fullName",
+                    gn."popularName",
+                    gn."imageUrl",
+                    gn."submittedAt",
+                    gn."nominationCount",
+                    gn."approvedCount",
+                    gn."pendingCount",
+                    gn."rejectedCount"
+                from category_page cp
+                left join grouped_nominees gn on gn.category = cp.id
+                order by cp.sort_order, cp.title, cp.id, gn."fullName"`,
                 [getOrgId(), search, searchPattern, skip, limit]
             ),
             query(
-                `select count(*)::int as count,
-                        coalesce(sum("nominationCount"), 0)::int as "submissionCount",
-                        count(distinct category)::int as "categoryCount"
-                 from (
-                    select n.position_id as category, count(*)::int as "nominationCount"
+                `with matching_categories as (
+                    select p.id
+                    from positions p
+                    where p.organization_id = $1
+                      and (
+                          $2 = ''
+                          or p.title ilike $3
+                          or exists (
+                              select 1
+                              from nominations n
+                              where n.organization_id = p.organization_id
+                                and n.position_id = p.id
+                                and (n.full_name ilike $3 or coalesce(n.popular_name, '') ilike $3)
+                          )
+                      )
+                ),
+                grouped_nominees as (
+                    select n.position_id,
+                           count(*)::int as "nominationCount"
                     from nominations n
+                    join matching_categories mc on mc.id = n.position_id
                     left join positions p on p.id = n.position_id and p.organization_id = n.organization_id
                     where n.organization_id = $1
-                      and n.status = 'pending'
-                      and ($2 = '' or n.full_name ilike $3 or coalesce(n.popular_name, '') ilike $3 or coalesce(p.title, '') ilike $3)
+                      and ($2 = '' or p.title ilike $3 or n.full_name ilike $3 or coalesce(n.popular_name, '') ilike $3)
                     group by n.election_id, n.position_id,
                              lower(regexp_replace(trim(n.full_name), '\\s+', ' ', 'g'))
-                 ) grouped`,
+                )
+                select
+                    (select count(*)::int from matching_categories) as "categoryCount",
+                    count(*)::int as count,
+                    coalesce(sum("nominationCount"), 0)::int as "submissionCount"
+                from grouped_nominees`,
                 [getOrgId(), search, searchPattern]
             ),
         ])
+
+        const categories = []
+        const categoriesById = new Map()
+        for (const row of categoryRows.rows) {
+            let category = categoriesById.get(row.category)
+            if (!category) {
+                category = {
+                    id: row.category,
+                    title: row.categoryTitle,
+                    sortOrder: row.categorySort,
+                    nominations: [],
+                }
+                categoriesById.set(row.category, category)
+                categories.push(category)
+            }
+            if (row.id) {
+                category.nominations.push({
+                    id: row.id,
+                    nominationIds: row.nominationIds,
+                    fullName: row.fullName,
+                    popularName: row.popularName,
+                    category: row.category,
+                    imageUrl: row.imageUrl,
+                    submittedAt: row.submittedAt,
+                    nominationCount: row.nominationCount,
+                    approvedCount: row.approvedCount,
+                    pendingCount: row.pendingCount,
+                    rejectedCount: row.rejectedCount,
+                })
+            }
+        }
+
         const count = total.rows[0]?.count || 0
         const submissionCount = total.rows[0]?.submissionCount || 0
         const categoryCount = total.rows[0]?.categoryCount || 0
         res.json({
-            nominations: pending.rows,
+            categories,
+            nominations: categories.flatMap(category => category.nominations),
             total: count,
             submissionTotal: submissionCount,
             categoryTotal: categoryCount,
