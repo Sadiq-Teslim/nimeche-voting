@@ -439,14 +439,13 @@ router.post('/reset-election', async (req, res) => {
 // --- Export unique nominees, grouped per award category ---
 router.post('/export-nominations', async (req, res) => {
     try {
-        const nominations = await query(
-            `select
+        const rows = await query(
+            `with grouped_nominees as (
+                select
                     (array_agg(n.id order by n.submitted_at desc))[1] as id,
                     (array_agg(n.full_name order by n.submitted_at desc))[1] as "fullName",
                     max(n.popular_name) as "popularName",
                     n.position_id as category,
-                    max(p.title) as "categoryTitle",
-                    min(coalesce(p.sort_order, 2147483647))::int as "categorySort",
                     max(n.image_url) as "imageUrl",
                     count(*)::int as "nominationCount",
                     count(*) filter (where n.status = 'approved')::int as "approvedCount",
@@ -454,18 +453,56 @@ router.post('/export-nominations', async (req, res) => {
                     count(*) filter (where n.status = 'rejected')::int as "rejectedCount",
                     min(n.submitted_at) as "firstSubmittedAt",
                     max(n.submitted_at) as "lastSubmittedAt"
-             from nominations n
-             left join positions p on p.id = n.position_id and p.organization_id = n.organization_id
-             where n.organization_id = $1
-             group by n.election_id, n.position_id,
-                      lower(regexp_replace(trim(n.full_name), '\\s+', ' ', 'g'))
-             order by "categorySort", "categoryTitle", "fullName"`,
+                from nominations n
+                where n.organization_id = $1
+                group by n.election_id, n.position_id,
+                         lower(regexp_replace(trim(n.full_name), '\\s+', ' ', 'g'))
+            )
+            select
+                p.id as category,
+                p.title as "categoryTitle",
+                p.sort_order as "categorySort",
+                gn.id,
+                gn."fullName",
+                gn."popularName",
+                gn."imageUrl",
+                gn."nominationCount",
+                gn."approvedCount",
+                gn."pendingCount",
+                gn."rejectedCount",
+                gn."firstSubmittedAt",
+                gn."lastSubmittedAt"
+            from positions p
+            left join grouped_nominees gn on gn.category = p.id
+            where p.organization_id = $1
+            order by p.sort_order, p.title, p.id, gn."fullName"`,
             [getOrgId()]
         )
-        const submissionTotal = nominations.rows.reduce((sum, row) => sum + row.nominationCount, 0)
+
+        const categories = []
+        const categoriesById = new Map()
+        for (const row of rows.rows) {
+            let category = categoriesById.get(row.category)
+            if (!category) {
+                category = {
+                    id: row.category,
+                    title: row.categoryTitle,
+                    sortOrder: row.categorySort,
+                    nominations: [],
+                }
+                categoriesById.set(row.category, category)
+                categories.push(category)
+            }
+            if (row.id) category.nominations.push(row)
+        }
+
+        const nominations = categories.flatMap(category => category.nominations)
+        const submissionTotal = nominations.reduce((sum, row) => sum + row.nominationCount, 0)
         res.json({
-            nominations: nominations.rows,
-            total: nominations.rowCount,
+            categories,
+            nominations,
+            categoryTotal: categories.length,
+            total: nominations.length,
             submissionTotal,
         })
     } catch (error) {

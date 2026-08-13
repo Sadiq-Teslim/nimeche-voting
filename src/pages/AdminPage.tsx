@@ -286,7 +286,8 @@ const AdminPage = () => {
     setIsDownloading(true);
     try {
       const response = await api.post("/export-nominations", {}, authHeaders(adminToken));
-      const nominations = response.data.nominations || [];
+      const categoryGroups: NominationCategory[] = response.data.categories || [];
+      const nominations = categoryGroups.flatMap((category) => category.nominations);
       const { default: jsPDF } = await import("jspdf");
       const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
       const pageWidth = pdf.internal.pageSize.getWidth();
@@ -295,10 +296,6 @@ const AdminPage = () => {
       let y = margin;
       let pageNumber = 1;
       let logoData: string | null = null;
-      const categoryUniqueCounts = nominations.reduce((counts: Record<string, number>, nomination: { category: string }) => {
-        counts[nomination.category] = (counts[nomination.category] || 0) + 1;
-        return counts;
-      }, {});
 
       try {
         const logoResponse = await fetch(assetUrl(organization.logo));
@@ -362,52 +359,58 @@ const AdminPage = () => {
       };
 
       addHeader();
-      if (nominations.length === 0) {
+      if (categoryGroups.length === 0) {
         pdf.setFontSize(11);
-        pdf.text("No nominations have been submitted.", margin, y);
+        pdf.text("No award categories have been configured.", margin, y);
       } else {
-        let currentCategory = "";
-        for (const nomination of nominations) {
-          const categoryTitle = nomination.categoryTitle || getCategoryTitle(nomination.category);
-          if (categoryTitle !== currentCategory) {
-            ensureSpace(20);
-            if (currentCategory) y += 3;
-            currentCategory = categoryTitle;
-            pdf.setFillColor(255, 247, 237);
-            pdf.roundedRect(margin, y - 5, pageWidth - margin * 2, 11, 1.5, 1.5, "F");
-            pdf.setFont("helvetica", "bold");
-            pdf.setFontSize(11);
-            pdf.setTextColor(194, 65, 12);
-            const categoryHeading = `${categoryTitle} | ${categoryUniqueCounts[nomination.category] || 0} unique nominee${categoryUniqueCounts[nomination.category] === 1 ? "" : "s"}`;
-            const titleLines = pdf.splitTextToSize(categoryHeading, pageWidth - margin * 2 - 8);
-            pdf.text(titleLines, margin, y);
-            y += Math.max(10, titleLines.length * 5 + 5);
+        for (const category of categoryGroups) {
+          ensureSpace(20);
+          if (category !== categoryGroups[0]) y += 3;
+          pdf.setFillColor(255, 247, 237);
+          pdf.roundedRect(margin, y - 5, pageWidth - margin * 2, 11, 1.5, 1.5, "F");
+          pdf.setFont("helvetica", "bold");
+          pdf.setFontSize(11);
+          pdf.setTextColor(194, 65, 12);
+          const categoryHeading = `${category.title || getCategoryTitle(category.id)} | ${category.nominations.length} unique nominee${category.nominations.length === 1 ? "" : "s"}`;
+          const titleLines = pdf.splitTextToSize(categoryHeading, pageWidth - margin * 2 - 8);
+          pdf.text(titleLines, margin, y);
+          y += Math.max(10, titleLines.length * 5 + 5);
+
+          if (category.nominations.length === 0) {
+            pdf.setFont("helvetica", "italic");
+            pdf.setFontSize(9);
+            pdf.setTextColor(100, 116, 139);
+            pdf.text("No nominations submitted.", margin + 4, y);
+            y += 8;
+            continue;
           }
 
-          const approvedCount = Number(nomination.approvedCount || 0);
-          const pendingCount = Number(nomination.pendingCount || 0);
-          const rejectedCount = Number(nomination.rejectedCount || 0);
-          const reviewState = approvedCount > 0
-            ? "APPROVED"
-            : pendingCount > 0
-              ? "PENDING"
-              : rejectedCount > 0
-                ? "REJECTED"
-                : "UNREVIEWED";
-          const detail = [
-            nomination.fullName,
-            nomination.popularName ? `(${nomination.popularName})` : "",
-            `| Nominated ${nomination.nominationCount || 1} time${Number(nomination.nominationCount || 1) === 1 ? "" : "s"}`,
-            `| ${reviewState}`,
-          ].filter(Boolean).join("  ");
-          pdf.setFont("helvetica", "normal");
-          pdf.setFontSize(9);
-          pdf.setTextColor(51, 65, 85);
-          const lines = pdf.splitTextToSize(detail, pageWidth - margin * 2 - 4);
-          ensureSpace(lines.length * 5 + 4);
-          pdf.text("-", margin, y);
-          pdf.text(lines, margin + 4, y);
-          y += lines.length * 5 + 3;
+          for (const nomination of category.nominations) {
+            const approvedCount = Number(nomination.approvedCount || 0);
+            const pendingCount = Number(nomination.pendingCount || 0);
+            const rejectedCount = Number(nomination.rejectedCount || 0);
+            const reviewState = approvedCount > 0
+              ? "APPROVED"
+              : pendingCount > 0
+                ? "PENDING"
+                : rejectedCount > 0
+                  ? "REJECTED"
+                  : "UNREVIEWED";
+            const detail = [
+              nomination.fullName,
+              nomination.popularName ? `(${nomination.popularName})` : "",
+              `| Nominated ${nomination.nominationCount || 1} time${Number(nomination.nominationCount || 1) === 1 ? "" : "s"}`,
+              `| ${reviewState}`,
+            ].filter(Boolean).join("  ");
+            pdf.setFont("helvetica", "normal");
+            pdf.setFontSize(9);
+            pdf.setTextColor(51, 65, 85);
+            const lines = pdf.splitTextToSize(detail, pageWidth - margin * 2 - 4);
+            ensureSpace(lines.length * 5 + 4);
+            pdf.text("-", margin, y);
+            pdf.text(lines, margin + 4, y);
+            y += lines.length * 5 + 3;
+          }
         }
       }
       addFooter();
@@ -594,7 +597,9 @@ const AdminPage = () => {
     try {
       const res = await api.post("/delete-nominations", {}, authHeaders(adminToken));
       alert(res.data.message);
-      setPendingNominations([]);
+      setNominationCategoryGroups([]);
+      setNominationTotal(0);
+      setNominationSubmissionTotal(0);
     } catch {
       alert("Failed to delete nominations.");
     } finally {
@@ -968,9 +973,9 @@ const AdminPage = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
                 <div className="bg-slate-900 p-4 rounded-lg border border-slate-800">
-                  <p className="text-slate-400 text-sm">Total Votes</p>
+                  <p className="text-slate-400 text-sm">{activeTab === "nominations" ? "Total Submissions" : "Total Votes"}</p>
                   <p className="text-2xl font-bold text-amber-400">
-                    {stats.totalVotes.toLocaleString()}
+                    {(activeTab === "nominations" ? nominationSubmissionTotal : stats.totalVotes).toLocaleString()}
                   </p>
                 </div>
                 <div className="bg-slate-900 p-4 rounded-lg border border-slate-800">
@@ -980,9 +985,9 @@ const AdminPage = () => {
                   </p>
                 </div>
                 <div className="bg-slate-900 p-4 rounded-lg border border-slate-800">
-                  <p className="text-slate-400 text-sm">Nominees</p>
+                  <p className="text-slate-400 text-sm">{activeTab === "nominations" ? "Unique Nominees" : "Nominees"}</p>
                   <p className="text-2xl font-bold text-amber-400">
-                    {stats.totalNominees}
+                    {activeTab === "nominations" ? nominationTotal.toLocaleString() : stats.totalNominees}
                   </p>
                 </div>
               </div>
