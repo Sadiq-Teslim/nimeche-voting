@@ -26,10 +26,13 @@ export interface SubCategoryInfo {
 }
 export interface Nomination {
   id: string;
+  nominationIds?: string[];
   fullName: string;
   popularName?: string;
   category: string;
   imageUrl?: string;
+  nominationCount?: number;
+  submittedAt?: string;
 }
 export interface ModalState {
   isOpen: boolean;

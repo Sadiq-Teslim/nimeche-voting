@@ -36,30 +36,85 @@ router.post('/results', async (req, res) => {
     }
 })
 
-// --- Pending nominations (paginated) ---
+// --- Pending nominations (paginated by complete award category) ---
 router.post('/pending-nominations', async (req, res) => {
     try {
         const page = Math.max(1, parseInt(req.body.page) || 1)
-        const limit = Math.min(100, Math.max(1, parseInt(req.body.limit) || 50))
+        const limit = Math.min(20, Math.max(1, parseInt(req.body.limit) || 5))
         const skip = (page - 1) * limit
+        const search = typeof req.body.search === 'string' ? req.body.search.trim().slice(0, 100) : ''
+        const searchPattern = `%${search}%`
 
         const [pending, total] = await Promise.all([
             query(
-                `select id, full_name as "fullName", popular_name as "popularName", position_id as category,
-                        image_url as "imageUrl", submitted_at as "submittedAt"
-                 from nominations
-                 where organization_id = $1 and status = 'pending'
-                 order by submitted_at desc
-                 offset $2 limit $3`,
-                [getOrgId(), skip, limit]
+                `with filtered as (
+                    select n.*, p.title as category_title,
+                           coalesce(p.sort_order, 2147483647) as category_sort
+                    from nominations n
+                    left join positions p on p.id = n.position_id and p.organization_id = n.organization_id
+                    where n.organization_id = $1
+                      and n.status = 'pending'
+                      and ($2 = '' or n.full_name ilike $3 or coalesce(n.popular_name, '') ilike $3 or coalesce(p.title, '') ilike $3)
+                ),
+                grouped as (
+                    select
+                        (array_agg(n.id order by n.submitted_at desc))[1] as id,
+                        array_agg(n.id order by n.submitted_at desc) as "nominationIds",
+                        (array_agg(n.full_name order by n.submitted_at desc))[1] as "fullName",
+                        max(n.popular_name) as "popularName",
+                        n.position_id as category,
+                        max(n.image_url) as "imageUrl",
+                        max(n.submitted_at) as "submittedAt",
+                        count(*)::int as "nominationCount",
+                        max(n.category_title) as "categoryTitle",
+                        min(n.category_sort) as "categorySort"
+                    from filtered n
+                    group by n.election_id, n.position_id,
+                             lower(regexp_replace(trim(n.full_name), '\\s+', ' ', 'g'))
+                ),
+                category_page as (
+                    select category, min("categorySort") as sort_order,
+                           max("categoryTitle") as title
+                    from grouped
+                    group by category
+                    order by sort_order, title, category
+                    offset $4 limit $5
+                )
+                select grouped.*
+                from grouped
+                join category_page on category_page.category = grouped.category
+                order by category_page.sort_order, category_page.title,
+                         grouped."submittedAt" desc, grouped."fullName"`,
+                [getOrgId(), search, searchPattern, skip, limit]
             ),
             query(
-                `select count(*)::int as count from nominations where organization_id = $1 and status = 'pending'`,
-                [getOrgId()]
+                `select count(*)::int as count,
+                        coalesce(sum("nominationCount"), 0)::int as "submissionCount",
+                        count(distinct category)::int as "categoryCount"
+                 from (
+                    select n.position_id as category, count(*)::int as "nominationCount"
+                    from nominations n
+                    left join positions p on p.id = n.position_id and p.organization_id = n.organization_id
+                    where n.organization_id = $1
+                      and n.status = 'pending'
+                      and ($2 = '' or n.full_name ilike $3 or coalesce(n.popular_name, '') ilike $3 or coalesce(p.title, '') ilike $3)
+                    group by n.election_id, n.position_id,
+                             lower(regexp_replace(trim(n.full_name), '\\s+', ' ', 'g'))
+                 ) grouped`,
+                [getOrgId(), search, searchPattern]
             ),
         ])
         const count = total.rows[0]?.count || 0
-        res.json({ nominations: pending.rows, total: count, page, totalPages: Math.ceil(count / limit) })
+        const submissionCount = total.rows[0]?.submissionCount || 0
+        const categoryCount = total.rows[0]?.categoryCount || 0
+        res.json({
+            nominations: pending.rows,
+            total: count,
+            submissionTotal: submissionCount,
+            categoryTotal: categoryCount,
+            page,
+            totalPages: Math.max(1, Math.ceil(categoryCount / limit)),
+        })
     } catch (error) {
         console.error('Error fetching pending nominations:', error)
         res.status(500).json({ message: 'Error fetching pending nominations.' })
@@ -155,52 +210,93 @@ router.post('/approve-nomination', async (req, res) => {
         await transaction(async (client) => {
             // 1. Get the nomination details
             const nomRes = await client.query(
-                `select full_name, popular_name, position_id, image_url, election_id
+                `select full_name, popular_name, position_id, image_url, election_id, status
                  from nominations
-                 where organization_id = $1 and id = $2 and status = 'pending'`,
+                 where organization_id = $1 and id = $2
+                 for update`,
                 [getOrgId(), nominationId]
             )
 
             if (nomRes.rows.length === 0) {
-                throw new Error('Nomination not found or already processed.')
+                const error = new Error('Nomination not found.')
+                error.statusCode = 404
+                throw error
             }
 
             const nom = nomRes.rows[0]
-            // Format candidate name: "FirstName LastName (PopularName/Level)" if popular_name exists
-            let candidateName = nom.full_name
-            if (nom.popular_name) {
-                candidateName = `${nom.full_name} (${nom.popular_name})`
+            if (nom.status !== 'pending') {
+                return { processed: 0, alreadyProcessed: true }
             }
 
-            // 2. Insert into candidates
-            await client.query(
+            const duplicateRes = await client.query(
+                `select id, full_name, popular_name, image_url
+                 from nominations
+                 where organization_id = $1
+                   and election_id = $2
+                   and position_id = $3
+                   and status = 'pending'
+                   and lower(regexp_replace(trim(full_name), '\\s+', ' ', 'g')) =
+                       lower(regexp_replace(trim($4), '\\s+', ' ', 'g'))
+                 for update`,
+                [getOrgId(), nom.election_id, nom.position_id, nom.full_name]
+            )
+
+            const preferred = duplicateRes.rows.find(row => row.image_url) || duplicateRes.rows[0]
+            const candidateName = preferred.full_name.trim()
+            const existingCandidate = await client.query(
+                `select id
+                 from candidates
+                 where organization_id = $1 and election_id = $2 and position_id = $3
+                   and lower(regexp_replace(regexp_replace(trim(name), '\\s*\\([^)]*\\)\\s*$', ''), '\\s+', ' ', 'g')) =
+                       lower(regexp_replace(trim($4), '\\s+', ' ', 'g'))
+                 order by created_at asc
+                 limit 1
+                 for update`,
+                [getOrgId(), nom.election_id, nom.position_id, candidateName]
+            )
+
+            if (existingCandidate.rows[0]) {
+                await client.query(
+                    `update candidates
+                     set image_url = coalesce($2, image_url),
+                         description = coalesce($3, description),
+                         status = 'approved'
+                     where id = $1`,
+                    [existingCandidate.rows[0].id, preferred.image_url || null, description || preferred.popular_name || null]
+                )
+            } else {
+                await client.query(
                 `insert into candidates (organization_id, election_id, position_id, name, description, image_url, status)
                  values ($1, $2, $3, $4, $5, $6, 'approved')
                  on conflict (election_id, position_id, lower(name)) do update
-                 set image_url = coalesce(excluded.image_url, candidates.image_url)`,
+                 set image_url = coalesce(excluded.image_url, candidates.image_url),
+                     description = coalesce(excluded.description, candidates.description),
+                     status = 'approved'`,
                 [
                     getOrgId(),
                     nom.election_id,
                     nom.position_id,
-                    candidateName.trim(),
-                    description || null,
-                    nom.image_url || null
+                    candidateName,
+                    description || preferred.popular_name || null,
+                    preferred.image_url || null
                 ]
-            )
+                )
+            }
 
-            // 3. Mark nomination as approved
-            await client.query(
+            const updated = await client.query(
                 `update nominations
                  set status = 'approved'
-                 where organization_id = $1 and id = $2`,
-                [getOrgId(), nominationId]
+                 where id = any($1::uuid[])
+                 returning id`,
+                [duplicateRes.rows.map(row => row.id)]
             )
+            return { processed: updated.rowCount, alreadyProcessed: false }
         })
 
-        res.json({ success: true, message: 'Nomination approved and candidate added successfully!' })
+        res.json({ success: true, message: 'Nominee approved successfully.' })
     } catch (error) {
         console.error('Error approving nomination:', error)
-        res.status(400).json({ message: error.message || 'Error processing approval.' })
+        res.status(error.statusCode || 500).json({ message: error.message || 'Error processing approval.' })
     }
 })
 
@@ -210,19 +306,33 @@ router.post('/reject-nomination', async (req, res) => {
     if (!nominationId) return res.status(400).json({ message: 'Nomination ID is required.' })
 
     try {
-        const result = await query(
-            `update nominations
-             set status = 'rejected'
-             where organization_id = $1 and id = $2 and status = 'pending'
-             returning id`,
-            [getOrgId(), nominationId]
-        )
-
-        if (result.rows.length === 0) {
-            return res.status(404).json({ message: 'Nomination not found or already processed.' })
-        }
-
-        res.json({ success: true, message: 'Nomination rejected.' })
+        const result = await transaction(async client => {
+            const nomination = await client.query(
+                `select election_id, position_id, full_name, status
+                 from nominations
+                 where organization_id = $1 and id = $2
+                 for update`,
+                [getOrgId(), nominationId]
+            )
+            if (!nomination.rows[0]) return null
+            if (nomination.rows[0].status !== 'pending') return { processed: 0 }
+            const nom = nomination.rows[0]
+            const updated = await client.query(
+                `update nominations
+                 set status = 'rejected'
+                 where organization_id = $1
+                   and election_id = $2
+                   and position_id = $3
+                   and status = 'pending'
+                   and lower(regexp_replace(trim(full_name), '\\s+', ' ', 'g')) =
+                       lower(regexp_replace(trim($4), '\\s+', ' ', 'g'))
+                 returning id`,
+                [getOrgId(), nom.election_id, nom.position_id, nom.full_name]
+            )
+            return { processed: updated.rowCount }
+        })
+        if (!result) return res.status(404).json({ message: 'Nomination not found.' })
+        res.json({ success: true, processed: result.processed, message: 'Nominee rejected.' })
     } catch (error) {
         console.error('Error rejecting nomination:', error)
         res.status(500).json({ message: 'Server error.' })
@@ -248,31 +358,38 @@ router.post('/reset-election', async (req, res) => {
     }
 })
 
-// --- Export nominations (paginated, POST instead of GET with query param) ---
+// --- Export unique nominees, grouped per award category ---
 router.post('/export-nominations', async (req, res) => {
     try {
-        const page = Math.max(1, parseInt(req.body.page) || 1)
-        const limit = Math.min(200, Math.max(1, parseInt(req.body.limit) || 100))
-        const skip = (page - 1) * limit
-
-        const [nominations, total] = await Promise.all([
-            query(
-                `select full_name as "fullName", popular_name as "popularName", position_id as category, image_url as "imageUrl"
-                 from nominations
-                 where organization_id = $1 and image_url is not null
-                 order by submitted_at desc
-                 offset $2 limit $3`,
-                [getOrgId(), skip, limit]
-            ),
-            query(
-                `select count(*)::int as count
-                 from nominations
-                 where organization_id = $1 and image_url is not null`,
-                [getOrgId()]
-            )
-        ])
-        const count = total.rows[0]?.count || 0
-        res.json({ nominations: nominations.rows, total: count, page, totalPages: Math.ceil(count / limit) })
+        const nominations = await query(
+            `select
+                    (array_agg(n.id order by n.submitted_at desc))[1] as id,
+                    (array_agg(n.full_name order by n.submitted_at desc))[1] as "fullName",
+                    max(n.popular_name) as "popularName",
+                    n.position_id as category,
+                    max(p.title) as "categoryTitle",
+                    min(coalesce(p.sort_order, 2147483647))::int as "categorySort",
+                    max(n.image_url) as "imageUrl",
+                    count(*)::int as "nominationCount",
+                    count(*) filter (where n.status = 'approved')::int as "approvedCount",
+                    count(*) filter (where n.status = 'pending')::int as "pendingCount",
+                    count(*) filter (where n.status = 'rejected')::int as "rejectedCount",
+                    min(n.submitted_at) as "firstSubmittedAt",
+                    max(n.submitted_at) as "lastSubmittedAt"
+             from nominations n
+             left join positions p on p.id = n.position_id and p.organization_id = n.organization_id
+             where n.organization_id = $1
+             group by n.election_id, n.position_id,
+                      lower(regexp_replace(trim(n.full_name), '\\s+', ' ', 'g'))
+             order by "categorySort", "categoryTitle", "fullName"`,
+            [getOrgId()]
+        )
+        const submissionTotal = nominations.rows.reduce((sum, row) => sum + row.nominationCount, 0)
+        res.json({
+            nominations: nominations.rows,
+            total: nominations.rowCount,
+            submissionTotal,
+        })
     } catch (error) {
         console.error('Error exporting nominations:', error)
         res.status(500).json({ message: 'A server error occurred during export.' })

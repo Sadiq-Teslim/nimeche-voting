@@ -38,6 +38,8 @@ import type {
 import { api, assetUrl } from "../api/client";
 import { organization } from "../config/organization";
 
+const NOMINATION_CATEGORIES_PER_PAGE = 5;
+
 const AdminPage = () => {
   // --- STATE MANAGEMENT ---
   const [adminToken, setAdminToken] = useState("");
@@ -50,6 +52,12 @@ const AdminPage = () => {
   const [pendingNominations, setPendingNominations] = useState<Nomination[]>(
     []
   );
+  const [nominationTotal, setNominationTotal] = useState(0);
+  const [nominationSubmissionTotal, setNominationSubmissionTotal] = useState(0);
+  const [nominationPage, setNominationPage] = useState(1);
+  const [nominationTotalPages, setNominationTotalPages] = useState(1);
+  const [nominationSearch, setNominationSearch] = useState("");
+  const [isLoadingNominations, setIsLoadingNominations] = useState(false);
   const [electionStatus, setElectionStatus] = useState<"open" | "closed">(
     "closed"
   );
@@ -96,6 +104,31 @@ const AdminPage = () => {
     headers: { Authorization: `Bearer ${token}` }
   }), []);
 
+  const fetchNominationPage = useCallback(async (
+    token: string,
+    page = 1,
+    search = "",
+    showLoading = true,
+  ) => {
+    if (showLoading) setIsLoadingNominations(true);
+    try {
+      const response = await api.post(
+        "/pending-nominations",
+        { page, limit: NOMINATION_CATEGORIES_PER_PAGE, search },
+        authHeaders(token),
+      );
+      const totalPages = Math.max(1, response.data.totalPages || 1);
+      setPendingNominations(response.data.nominations || []);
+      setNominationTotal(response.data.total || 0);
+      setNominationSubmissionTotal(response.data.submissionTotal || 0);
+      setNominationTotalPages(totalPages);
+      setNominationPage(Math.min(page, totalPages));
+      return response.data;
+    } finally {
+      if (showLoading) setIsLoadingNominations(false);
+    }
+  }, [authHeaders]);
+
   const handleResetElection = async () => {
     const response = await api.post("/reset-election", {}, authHeaders(adminToken));
     handleRefresh();
@@ -127,16 +160,15 @@ const AdminPage = () => {
       setIsInitialLoading(true);
       const headers = { headers: { Authorization: `Bearer ${token}` } };
       try {
-        const [resultsRes, nominationsRes, categoriesRes, statusRes, setupRes] =
+        const [resultsRes, categoriesRes, statusRes, setupRes] =
           await Promise.all([
             api.post("/results", {}, headers),
-            api.post("/pending-nominations", {}, headers),
             api.get("/ballot"),
             api.get("/election-status"),
             api.get("/setup", headers),
+            fetchNominationPage(token, 1, "", false),
           ]);
         setResults(resultsRes.data);
-        setPendingNominations(nominationsRes.data.nominations || nominationsRes.data);
         setCategories(categoriesRes.data.categories);
         setDepartments(categoriesRes.data.departments);
         setElectionStatus(statusRes.data.status);
@@ -154,7 +186,7 @@ const AdminPage = () => {
         setIsInitialLoading(false);
       }
     },
-    []
+    [fetchNominationPage]
   );
 
   const handleLogin = async (submittedPassword: string) => {
@@ -179,15 +211,14 @@ const AdminPage = () => {
     setIsRefreshing(true);
     const headers = { headers: { Authorization: `Bearer ${adminToken}` } };
     try {
-      const [resultsRes, nominationsRes, categoriesRes, statusRes, setupRes] = await Promise.all([
+      const [resultsRes, categoriesRes, statusRes, setupRes] = await Promise.all([
         api.post("/results", {}, headers),
-        api.post("/pending-nominations", {}, headers),
         api.get("/ballot"),
         api.get("/election-status"),
         api.get("/setup", headers),
+        fetchNominationPage(adminToken, nominationPage, nominationSearch, false),
       ]);
       setResults(resultsRes.data);
-      setPendingNominations(nominationsRes.data.nominations || nominationsRes.data || []);
       setCategories(categoriesRes.data.categories);
       setDepartments(categoriesRes.data.departments);
       setElectionStatus(statusRes.data.status);
@@ -200,7 +231,17 @@ const AdminPage = () => {
     } finally {
       setIsRefreshing(false);
     }
-  }, [adminToken]);
+  }, [adminToken, fetchNominationPage, nominationPage, nominationSearch]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !adminToken) return;
+    const timeout = window.setTimeout(() => {
+      fetchNominationPage(adminToken, nominationPage, nominationSearch).catch((fetchError) => {
+        console.error("Failed to load nominations:", fetchError);
+      });
+    }, 300);
+    return () => window.clearTimeout(timeout);
+  }, [adminToken, fetchNominationPage, isAuthenticated, nominationPage, nominationSearch]);
 
   const saveElectionSetup = async (payload: Pick<ElectionSetup, "title" | "year" | "status">) => {
     await api.put("/election", payload, authHeaders(adminToken));
@@ -243,7 +284,149 @@ const AdminPage = () => {
     return () => clearInterval(interval);
   }, [isAuthenticated, handleRefresh]);
 
-    const handleDownloadPdf = async () => {
+  const handleDownloadNominationsPdf = async () => {
+    setIsDownloading(true);
+    try {
+      const response = await api.post("/export-nominations", {}, authHeaders(adminToken));
+      const nominations = response.data.nominations || [];
+      const { default: jsPDF } = await import("jspdf");
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 16;
+      let y = margin;
+      let pageNumber = 1;
+      let logoData: string | null = null;
+      const categoryUniqueCounts = nominations.reduce((counts: Record<string, number>, nomination: { category: string }) => {
+        counts[nomination.category] = (counts[nomination.category] || 0) + 1;
+        return counts;
+      }, {});
+
+      try {
+        const logoResponse = await fetch(assetUrl(organization.logo));
+        const logoBlob = await logoResponse.blob();
+        logoData = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = reject;
+          reader.readAsDataURL(logoBlob);
+        });
+      } catch {
+        logoData = null;
+      }
+
+      const addHeader = () => {
+        pdf.setFillColor(10, 13, 10);
+        pdf.rect(0, 0, pageWidth, 37, "F");
+        pdf.setFillColor(232, 101, 10);
+        pdf.rect(0, 37, pageWidth, 1.5, "F");
+        if (logoData) {
+          try {
+            pdf.addImage(logoData, "PNG", margin, 7, 22, 22, undefined, "FAST");
+          } catch {
+            // The text header remains complete if a browser cannot decode the logo.
+          }
+        }
+        const titleX = logoData ? margin + 28 : margin;
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(17);
+        pdf.text(`${organization.shortName} Nomination Report`, titleX, 14);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(9);
+        pdf.setTextColor(190, 208, 190);
+        pdf.text(`Official Awards Nomination Register | ${organization.year}`, titleX, 21);
+        pdf.text(
+          `${response.data.total || nominations.length} unique nominees | ${(response.data.submissionTotal || 0).toLocaleString()} total submissions`,
+          titleX,
+          27,
+        );
+        pdf.setTextColor(30, 41, 59);
+        y = 47;
+      };
+
+      const addFooter = () => {
+        pdf.setDrawColor(226, 232, 240);
+        pdf.line(margin, pageHeight - 12, pageWidth - margin, pageHeight - 12);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(8);
+        pdf.setTextColor(100, 116, 139);
+        pdf.text(`Generated ${new Date().toLocaleString()}`, margin, pageHeight - 7);
+        pdf.text(`Page ${pageNumber}`, pageWidth - margin, pageHeight - 7, { align: "right" });
+      };
+
+      const ensureSpace = (height = 14) => {
+        if (y + height <= pageHeight - 18) return;
+        addFooter();
+        pdf.addPage();
+        pageNumber += 1;
+        addHeader();
+      };
+
+      addHeader();
+      if (nominations.length === 0) {
+        pdf.setFontSize(11);
+        pdf.text("No nominations have been submitted.", margin, y);
+      } else {
+        let currentCategory = "";
+        for (const nomination of nominations) {
+          const categoryTitle = nomination.categoryTitle || getCategoryTitle(nomination.category);
+          if (categoryTitle !== currentCategory) {
+            ensureSpace(20);
+            if (currentCategory) y += 3;
+            currentCategory = categoryTitle;
+            pdf.setFillColor(255, 247, 237);
+            pdf.roundedRect(margin, y - 5, pageWidth - margin * 2, 11, 1.5, 1.5, "F");
+            pdf.setFont("helvetica", "bold");
+            pdf.setFontSize(11);
+            pdf.setTextColor(194, 65, 12);
+            const categoryHeading = `${categoryTitle} | ${categoryUniqueCounts[nomination.category] || 0} unique nominee${categoryUniqueCounts[nomination.category] === 1 ? "" : "s"}`;
+            const titleLines = pdf.splitTextToSize(categoryHeading, pageWidth - margin * 2 - 8);
+            pdf.text(titleLines, margin, y);
+            y += Math.max(10, titleLines.length * 5 + 5);
+          }
+
+          const approvedCount = Number(nomination.approvedCount || 0);
+          const pendingCount = Number(nomination.pendingCount || 0);
+          const rejectedCount = Number(nomination.rejectedCount || 0);
+          const reviewState = approvedCount > 0
+            ? "APPROVED"
+            : pendingCount > 0
+              ? "PENDING"
+              : rejectedCount > 0
+                ? "REJECTED"
+                : "UNREVIEWED";
+          const detail = [
+            nomination.fullName,
+            nomination.popularName ? `(${nomination.popularName})` : "",
+            `| Nominated ${nomination.nominationCount || 1} time${Number(nomination.nominationCount || 1) === 1 ? "" : "s"}`,
+            `| ${reviewState}`,
+          ].filter(Boolean).join("  ");
+          pdf.setFont("helvetica", "normal");
+          pdf.setFontSize(9);
+          pdf.setTextColor(51, 65, 85);
+          const lines = pdf.splitTextToSize(detail, pageWidth - margin * 2 - 4);
+          ensureSpace(lines.length * 5 + 4);
+          pdf.text("-", margin, y);
+          pdf.text(lines, margin + 4, y);
+          y += lines.length * 5 + 3;
+        }
+      }
+      addFooter();
+      pdf.save(`${organization.shortName.toLowerCase()}-unique-nominations-${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (downloadError) {
+      console.error("Error exporting nominations:", downloadError);
+      alert("Could not export the nominations PDF. Please try again.");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    if (activeTab === "nominations") {
+      await handleDownloadNominationsPdf();
+      return;
+    }
     const reportElement = document.getElementById("pdf-report");
     if (!reportElement) {
       alert("Could not find the report element to generate PDF.");
@@ -457,7 +640,7 @@ const AdminPage = () => {
   const sidebarItems = [
     { key: "results", label: "Live Results", icon: BarChart3 },
     { key: "tabular", label: "Table View", icon: ListChecks },
-    { key: "nominations", label: "Nominations", icon: FileText, count: pendingNominations.length },
+    { key: "nominations", label: "Nominations", icon: FileText, count: nominationTotal },
     { key: "setup", label: "Setup", icon: SlidersHorizontal },
     { key: "settings", label: "Settings", icon: Settings },
   ];
@@ -780,7 +963,7 @@ const AdminPage = () => {
                     className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
                   >
                     <Download className="w-4 h-4" />
-                    <span>{isDownloading ? "Preparing" : "Export PDF"}</span>
+                    <span>{isDownloading ? "Preparing" : activeTab === "nominations" ? "Export Nomination Report" : "Export PDF"}</span>
                   </button>
                 </div>
               </header>
@@ -831,16 +1014,25 @@ const AdminPage = () => {
         {activeTab === "nominations" && (
           <NominationsTab
             pendingNominations={pendingNominations}
+            total={nominationTotal}
+            submissionTotal={nominationSubmissionTotal}
+            page={nominationPage}
+            totalPages={nominationTotalPages}
+            isLoading={isLoadingNominations}
             getCategoryTitle={getCategoryTitle}
-            searchTerm={searchTerm}
-            onSearchChange={setSearchTerm}
+            searchTerm={nominationSearch}
+            onSearchChange={(value) => {
+              setNominationSearch(value);
+              setNominationPage(1);
+            }}
+            onPageChange={setNominationPage}
             onApproveNomination={async (nominationId) => {
               await api.post("/approve-nomination", { nominationId }, authHeaders(adminToken));
-              await handleRefresh();
+              await fetchNominationPage(adminToken, nominationPage, nominationSearch);
             }}
             onRejectNomination={async (nominationId) => {
               await api.post("/reject-nomination", { nominationId }, authHeaders(adminToken));
-              await handleRefresh();
+              await fetchNominationPage(adminToken, nominationPage, nominationSearch);
             }}
           />
         )}

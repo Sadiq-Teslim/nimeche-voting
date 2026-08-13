@@ -2,7 +2,7 @@
 const express = require('express')
 const jwt = require('jsonwebtoken')
 const router = express.Router()
-const { globalLimiter, adminLimiter, getElectionStatus, getPortalMode, getJwtSecret, getOrgId } = require('./middleware')
+const { globalLimiter, adminLoginLimiter, getElectionStatus, getPortalMode, getJwtSecret, getOrgId } = require('./middleware')
 const { query } = require('../db')
 const votingRoutes = require('./voting')
 const adminRoutes = require('./admin')
@@ -12,7 +12,7 @@ const nominationRoutes = require('./nominations')
 router.use(globalLimiter)
 
 // --- Admin login (returns JWT, must be BEFORE admin routes) ---
-router.post('/admin-login', adminLimiter, (req, res) => {
+router.post('/admin-login', adminLoginLimiter, (req, res) => {
     if (req.body.password !== process.env.ADMIN_PASSWORD) {
         return res.status(401).json({ message: 'Invalid password.' })
     }

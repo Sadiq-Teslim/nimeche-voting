@@ -18,6 +18,7 @@ function getOrgId() {
 const globalLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 60,
+    skip: req => req.headers.authorization?.startsWith('Bearer '),
     standardHeaders: true,
     legacyHeaders: false,
     message: { message: 'Too many requests. Please slow down.' }
@@ -31,12 +32,20 @@ const voteLimiter = rateLimit({
     message: { message: 'Too many vote attempts. Please try again later.' }
 })
 
-const adminLimiter = rateLimit({
+const adminLoginLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 15,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { message: 'Too many admin requests.' }
+    message: { message: 'Too many login attempts. Please wait and try again.' }
+})
+
+const adminLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 180,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: 'Too many admin requests. Please wait a moment.' }
 })
 
 const nominateLimiter = rateLimit({
@@ -153,6 +162,7 @@ module.exports = {
     globalLimiter,
     voteLimiter,
     adminLimiter,
+    adminLoginLimiter,
     nominateLimiter,
     csrfProtection,
     issueCsrfToken,

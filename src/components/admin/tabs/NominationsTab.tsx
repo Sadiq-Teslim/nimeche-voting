@@ -1,213 +1,216 @@
-import React, { useState, useMemo } from "react";
-import { Users, Link as LinkIcon, Check, Search, CheckCircle, XCircle } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import {
+  Check,
+  CheckCircle,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  Link as LinkIcon,
+  Loader2,
+  Search,
+  Users,
+  XCircle,
+} from "lucide-react";
 import type { Nomination } from "../../../types/admin";
 
 interface NominationsTabProps {
   pendingNominations: Nomination[];
+  total: number;
+  submissionTotal: number;
+  page: number;
+  totalPages: number;
+  isLoading: boolean;
   getCategoryTitle: (id: string) => string;
   searchTerm: string;
   onSearchChange: (value: string) => void;
+  onPageChange: (page: number) => void;
   onApproveNomination: (id: string) => Promise<void>;
   onRejectNomination: (id: string) => Promise<void>;
 }
 
+function mutationMessage(error: unknown, fallback: string) {
+  if (typeof error === "object" && error && "response" in error) {
+    const response = (error as { response?: { data?: { message?: string } } }).response;
+    if (response?.data?.message) return response.data.message;
+  }
+  return fallback;
+}
+
 const NominationsTab: React.FC<NominationsTabProps> = ({
   pendingNominations,
+  total,
+  submissionTotal,
+  page,
+  totalPages,
+  isLoading,
   getCategoryTitle,
   searchTerm,
   onSearchChange,
+  onPageChange,
   onApproveNomination,
   onRejectNomination,
 }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [openCategories, setOpenCategories] = useState<Set<string>>(new Set());
 
-  const handleCopyUrl = (url: string, id: string) => {
-    navigator.clipboard
-      .writeText(url)
-      .then(() => {
-        setCopiedId(id);
-        setTimeout(() => setCopiedId(null), 2000);
-      })
-      .catch((err) => {
-        console.error("Failed to copy text: ", err);
-        alert("Failed to copy URL.");
-      });
+  const groupedNominations = useMemo(
+    () =>
+      pendingNominations.reduce((groups, nomination) => {
+        (groups[nomination.category] ||= []).push(nomination);
+        return groups;
+      }, {} as Record<string, Nomination[]>),
+    [pendingNominations],
+  );
+
+  const toggleCategory = (category: string) => {
+    setOpenCategories((current) => {
+      const next = new Set(current);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+  };
+
+  const handleCopyUrl = async (url: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      alert("Failed to copy the image URL.");
+    }
   };
 
   const handleApprove = async (id: string) => {
+    if (processingId) return;
     setProcessingId(id);
     try {
       await onApproveNomination(id);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to approve nomination.");
+    } catch (error) {
+      alert(mutationMessage(error, "Failed to approve this nominee. Please try again."));
     } finally {
       setProcessingId(null);
     }
   };
 
   const handleReject = async (id: string) => {
-    if (!confirm("Are you sure you want to reject this nomination? It will be removed from pending but won't be added as a candidate.")) {
-      return;
-    }
+    if (processingId) return;
+    if (!confirm("Reject this nominee and every duplicate pending submission for this award?")) return;
     setProcessingId(id);
     try {
       await onRejectNomination(id);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to reject nomination.");
+    } catch (error) {
+      alert(mutationMessage(error, "Failed to reject this nominee. Please try again."));
     } finally {
       setProcessingId(null);
     }
   };
 
-  // Filter nominations based on the search term
-  const filteredNominations = useMemo(() => {
-    if (!searchTerm.trim()) {
-      return pendingNominations;
-    }
-    const lowercasedSearchTerm = searchTerm.toLowerCase();
-    return pendingNominations.filter(
-      (nom) =>
-        nom.fullName.toLowerCase().includes(lowercasedSearchTerm) ||
-        (nom.popularName &&
-          nom.popularName.toLowerCase().includes(lowercasedSearchTerm))
-    );
-  }, [pendingNominations, searchTerm]);
-
-  // Group the filtered list of nominations
-  const groupedNominations = useMemo(() => {
-    return filteredNominations.reduce((acc, nom) => {
-      (acc[nom.category] = acc[nom.category] || []).push(nom);
-      return acc;
-    }, {} as Record<string, Nomination[]>);
-  }, [filteredNominations]);
-
   return (
     <section>
-      <div className="flex flex-col sm:flex-row justify-between items-center mb-8 gap-4">
-        <h2 className="text-2xl sm:text-3xl font-bold text-amber-400 self-start sm:self-center">
-          Review Nominations
-        </h2>
-        <div className="relative w-full sm:w-auto sm:max-w-xs">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Search className="w-5 h-5 text-slate-400" />
-          </div>
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search for a nominee..."
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg py-2 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-amber-500 text-white"
-          />
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-amber-400 sm:text-3xl">Review Nominations</h2>
+          <p className="mt-1 text-sm text-slate-400">
+            {total.toLocaleString()} unique pending nominee{total === 1 ? "" : "s"} from {submissionTotal.toLocaleString()} submission{submissionTotal === 1 ? "" : "s"}. Repeated names are combined per award.
+          </p>
         </div>
+        <label className="relative block w-full sm:max-w-sm">
+          <span className="sr-only">Search nominees or award categories</span>
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+          <input
+            type="search"
+            value={searchTerm}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="Search nominee or award..."
+            className="min-h-11 w-full rounded-md border border-slate-700 bg-slate-900 py-2 pl-10 pr-4 text-white outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
+          />
+        </label>
       </div>
 
-      {pendingNominations.length === 0 && (
-        <div className="text-center py-20 bg-slate-800/50 rounded-lg border border-slate-700">
-          <Users className="mx-auto w-16 h-16 text-slate-500 mb-4" />
-          <h3 className="text-xl font-bold text-white">All Caught Up!</h3>
-          <p className="text-slate-400 mt-2">
-            There are no pending nominations to review at this time.
-          </p>
+      {isLoading ? (
+        <div className="flex min-h-64 items-center justify-center rounded-lg border border-slate-800 bg-slate-900/60">
+          <Loader2 className="h-8 w-8 animate-spin text-amber-400" />
         </div>
-      )}
-
-      {pendingNominations.length > 0 && filteredNominations.length === 0 && (
-        <div className="text-center py-20 bg-slate-800/50 rounded-lg border border-slate-700">
-          <Search className="mx-auto w-16 h-16 text-slate-500 mb-4" />
-          <h3 className="text-xl font-bold text-white">No Nominations Found</h3>
-          <p className="text-slate-400 mt-2">
-            Your search for "{searchTerm}" did not match any pending
-            nominations.
-          </p>
+      ) : pendingNominations.length === 0 ? (
+        <div className="rounded-lg border border-slate-800 bg-slate-900/60 py-20 text-center">
+          {searchTerm ? <Search className="mx-auto h-14 w-14 text-slate-600" /> : <Users className="mx-auto h-14 w-14 text-slate-600" />}
+          <h3 className="mt-4 text-xl font-bold text-white">{searchTerm ? "No Matches" : "All Caught Up"}</h3>
+          <p className="mt-2 text-slate-400">{searchTerm ? "Try another nominee or award name." : "There are no pending nominations to review."}</p>
         </div>
-      )}
+      ) : (
+        <div className="space-y-3">
+          {Object.entries(groupedNominations).map(([category, nominations]) => {
+            const isOpen = openCategories.has(category);
+            const rawSubmissionCount = nominations.reduce((sum, item) => sum + (item.nominationCount || 1), 0);
+            return (
+              <section key={category} className="overflow-hidden rounded-lg border border-slate-800 bg-slate-900/70">
+                <button
+                  type="button"
+                  onClick={() => toggleCategory(category)}
+                  className="flex min-h-16 w-full items-center justify-between gap-4 px-4 py-3 text-left hover:bg-slate-800/70 sm:px-5"
+                  aria-expanded={isOpen}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-base font-bold text-amber-200 sm:text-lg">{getCategoryTitle(category)}</span>
+                    <span className="mt-0.5 block text-xs text-slate-400">{nominations.length} unique · {rawSubmissionCount} total submission{rawSubmissionCount === 1 ? "" : "s"}</span>
+                  </span>
+                  {isOpen ? <ChevronUp className="shrink-0 text-amber-400" /> : <ChevronDown className="shrink-0 text-slate-400" />}
+                </button>
 
-      {filteredNominations.length > 0 && (
-        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
-          <div className="space-y-6">
-            {Object.entries(groupedNominations).map(([category, noms]) => (
-              <div key={category} className="border-b border-slate-700/50 pb-6 last:border-0 last:pb-0">
-                <h3 className="font-bold text-xl text-amber-200 mb-3">
-                  {getCategoryTitle(category)} ({noms.length})
-                </h3>
-                <ul className="space-y-3">
-                  {noms.map((nom) => {
-                    const isMutating = processingId === nom.id;
-                    return (
-                      <li
-                        key={nom.id}
-                        className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-slate-700/60 p-4 rounded-lg border border-slate-700/30"
-                      >
-                        <div className="flex items-center gap-4">
-                          <img
-                            src={nom.imageUrl || "/placeholder.png"}
-                            alt={nom.fullName}
-                            className="w-14 h-14 rounded-full object-cover flex-shrink-0 border border-slate-600"
-                          />
-                          <div>
-                            <span className="font-semibold text-white text-lg block">
-                              {nom.fullName}
-                            </span>
-                            {nom.popularName && (
-                              <span className="text-xs text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
-                                {nom.popularName}
-                              </span>
-                            )}
+                {isOpen && (
+                  <ul className="space-y-3 border-t border-slate-800 p-3 sm:p-4">
+                    {nominations.map((nomination) => {
+                      const isMutating = processingId === nomination.id;
+                      const duplicateCount = nomination.nominationCount || 1;
+                      return (
+                        <li key={nomination.id} className="flex flex-col gap-4 rounded-md border border-slate-700/60 bg-slate-800/70 p-4 lg:flex-row lg:items-center lg:justify-between">
+                          <div className="flex min-w-0 items-center gap-4">
+                            <img src={nomination.imageUrl || "/placeholder.png"} alt="" className="h-14 w-14 shrink-0 rounded-full border border-slate-600 object-cover" />
+                            <div className="min-w-0">
+                              <p className="break-words text-lg font-semibold text-white">{nomination.fullName}</p>
+                              <div className="mt-1 flex flex-wrap gap-2 text-xs">
+                                {nomination.popularName && <span className="rounded bg-slate-950 px-2 py-1 text-slate-300">{nomination.popularName}</span>}
+                                {duplicateCount > 1 && <span className="rounded bg-amber-500/15 px-2 py-1 font-bold text-amber-300">Nominated {duplicateCount} times</span>}
+                              </div>
+                            </div>
                           </div>
-                        </div>
 
-                        <div className="flex items-center gap-2 w-full md:w-auto justify-end">
-                          {nom.imageUrl && (
-                            <button
-                              onClick={() => handleCopyUrl(nom.imageUrl!, nom.id)}
-                              className={`flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-md transition-all duration-200 ${
-                                copiedId === nom.id
-                                  ? "bg-green-500/20 text-green-400"
-                                  : "bg-slate-600 hover:bg-slate-500 text-slate-300"
-                              }`}
-                              disabled={isMutating}
-                            >
-                              {copiedId === nom.id ? (
-                                <>
-                                  <Check size={14} /> Copied!
-                                </>
-                              ) : (
-                                <>
-                                  <LinkIcon size={14} /> Image URL
-                                </>
-                              )}
+                          <div className="flex w-full flex-wrap items-center justify-end gap-2 lg:w-auto">
+                            {nomination.imageUrl && (
+                              <button type="button" onClick={() => handleCopyUrl(nomination.imageUrl!, nomination.id)} disabled={!!processingId} className="flex min-h-10 items-center gap-1.5 rounded-md bg-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-600 disabled:opacity-50">
+                                {copiedId === nomination.id ? <><Check size={14} /> Copied</> : <><LinkIcon size={14} /> Image URL</>}
+                              </button>
+                            )}
+                            <button type="button" onClick={() => handleApprove(nomination.id)} disabled={!!processingId} className="flex min-h-10 items-center gap-1.5 rounded-md bg-green-600 px-3 py-2 text-xs font-bold text-white hover:bg-green-500 disabled:cursor-wait disabled:opacity-50">
+                              {isMutating ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle size={14} />} Approve
                             </button>
-                          )}
-
-                          <button
-                            onClick={() => handleApprove(nom.id)}
-                            disabled={isMutating}
-                            className="flex items-center gap-1 bg-green-600 hover:bg-green-500 text-white text-xs font-bold px-3 py-2 rounded-md transition-colors disabled:opacity-50"
-                          >
-                            <CheckCircle size={14} />
-                            Approve
-                          </button>
-
-                          <button
-                            onClick={() => handleReject(nom.id)}
-                            disabled={isMutating}
-                            className="flex items-center gap-1 bg-red-600 hover:bg-red-500 text-white text-xs font-bold px-3 py-2 rounded-md transition-colors disabled:opacity-50"
-                          >
-                            <XCircle size={14} />
-                            Reject
-                          </button>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))}
-          </div>
+                            <button type="button" onClick={() => handleReject(nomination.id)} disabled={!!processingId} className="flex min-h-10 items-center gap-1.5 rounded-md bg-red-600 px-3 py-2 text-xs font-bold text-white hover:bg-red-500 disabled:cursor-wait disabled:opacity-50">
+                              {isMutating ? <Loader2 className="animate-spin" size={14} /> : <XCircle size={14} />} Reject
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </section>
+            );
+          })}
         </div>
+      )}
+
+      {totalPages > 1 && (
+        <nav className="mt-6 flex flex-col items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-900/60 p-3 sm:flex-row" aria-label="Nomination pages">
+          <p className="text-sm text-slate-400">Award groups · Page {page} of {totalPages}</p>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => onPageChange(page - 1)} disabled={page <= 1 || isLoading} aria-label="Previous nominations page" className="flex h-10 w-10 items-center justify-center rounded-md border border-slate-700 text-white hover:bg-slate-800 disabled:opacity-40"><ChevronLeft size={18} /></button>
+            <span className="min-w-24 text-center text-sm font-semibold text-white">{page} / {totalPages}</span>
+            <button type="button" onClick={() => onPageChange(page + 1)} disabled={page >= totalPages || isLoading} aria-label="Next nominations page" className="flex h-10 w-10 items-center justify-center rounded-md border border-slate-700 text-white hover:bg-slate-800 disabled:opacity-40"><ChevronRight size={18} /></button>
+          </div>
+        </nav>
       )}
     </section>
   );
