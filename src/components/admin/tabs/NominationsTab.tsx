@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import {
   Check,
   CheckCircle,
@@ -12,10 +12,10 @@ import {
   Users,
   XCircle,
 } from "lucide-react";
-import type { Nomination } from "../../../types/admin";
+import type { NominationCategory } from "../../../types/admin";
 
 interface NominationsTabProps {
-  pendingNominations: Nomination[];
+  categoryGroups: NominationCategory[];
   total: number;
   submissionTotal: number;
   page: number;
@@ -38,7 +38,7 @@ function mutationMessage(error: unknown, fallback: string) {
 }
 
 const NominationsTab: React.FC<NominationsTabProps> = ({
-  pendingNominations,
+  categoryGroups,
   total,
   submissionTotal,
   page,
@@ -54,15 +54,6 @@ const NominationsTab: React.FC<NominationsTabProps> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [openCategories, setOpenCategories] = useState<Set<string>>(new Set());
-
-  const groupedNominations = useMemo(
-    () =>
-      pendingNominations.reduce((groups, nomination) => {
-        (groups[nomination.category] ||= []).push(nomination);
-        return groups;
-      }, {} as Record<string, Nomination[]>),
-    [pendingNominations],
-  );
 
   const toggleCategory = (category: string) => {
     setOpenCategories((current) => {
@@ -114,7 +105,7 @@ const NominationsTab: React.FC<NominationsTabProps> = ({
         <div>
           <h2 className="text-2xl font-bold text-amber-400 sm:text-3xl">Review Nominations</h2>
           <p className="mt-1 text-sm text-slate-400">
-            {total.toLocaleString()} unique pending nominee{total === 1 ? "" : "s"} from {submissionTotal.toLocaleString()} submission{submissionTotal === 1 ? "" : "s"}. Repeated names are combined per award.
+            {total.toLocaleString()} unique nominee{total === 1 ? "" : "s"} from {submissionTotal.toLocaleString()} submission{submissionTotal === 1 ? "" : "s"}. Repeated names are combined inside each of the 20 awards.
           </p>
         </div>
         <label className="relative block w-full sm:max-w-sm">
@@ -134,7 +125,7 @@ const NominationsTab: React.FC<NominationsTabProps> = ({
         <div className="flex min-h-64 items-center justify-center rounded-lg border border-slate-800 bg-slate-900/60">
           <Loader2 className="h-8 w-8 animate-spin text-amber-400" />
         </div>
-      ) : pendingNominations.length === 0 ? (
+      ) : categoryGroups.length === 0 ? (
         <div className="rounded-lg border border-slate-800 bg-slate-900/60 py-20 text-center">
           {searchTerm ? <Search className="mx-auto h-14 w-14 text-slate-600" /> : <Users className="mx-auto h-14 w-14 text-slate-600" />}
           <h3 className="mt-4 text-xl font-bold text-white">{searchTerm ? "No Matches" : "All Caught Up"}</h3>
@@ -142,7 +133,9 @@ const NominationsTab: React.FC<NominationsTabProps> = ({
         </div>
       ) : (
         <div className="space-y-3">
-          {Object.entries(groupedNominations).map(([category, nominations]) => {
+          {categoryGroups.map((group) => {
+            const category = group.id;
+            const nominations = group.nominations;
             const isOpen = openCategories.has(category);
             const rawSubmissionCount = nominations.reduce((sum, item) => sum + (item.nominationCount || 1), 0);
             return (
@@ -154,7 +147,7 @@ const NominationsTab: React.FC<NominationsTabProps> = ({
                   aria-expanded={isOpen}
                 >
                   <span className="min-w-0">
-                    <span className="block truncate text-base font-bold text-amber-200 sm:text-lg">{getCategoryTitle(category)}</span>
+                    <span className="block truncate text-base font-bold text-amber-200 sm:text-lg">{group.title || getCategoryTitle(category)}</span>
                     <span className="mt-0.5 block text-xs text-slate-400">{nominations.length} unique · {rawSubmissionCount} total submission{rawSubmissionCount === 1 ? "" : "s"}</span>
                   </span>
                   {isOpen ? <ChevronUp className="shrink-0 text-amber-400" /> : <ChevronDown className="shrink-0 text-slate-400" />}
@@ -162,9 +155,13 @@ const NominationsTab: React.FC<NominationsTabProps> = ({
 
                 {isOpen && (
                   <ul className="space-y-3 border-t border-slate-800 p-3 sm:p-4">
-                    {nominations.map((nomination) => {
+                    {nominations.length === 0 ? (
+                      <li className="rounded-md border border-dashed border-slate-700 p-6 text-center text-sm text-slate-400">No nominations in this category yet.</li>
+                    ) : nominations.map((nomination) => {
                       const isMutating = processingId === nomination.id;
                       const duplicateCount = nomination.nominationCount || 1;
+                      const pendingCount = nomination.pendingCount || 0;
+                      const reviewState = pendingCount > 0 ? "Pending" : (nomination.approvedCount || 0) > 0 ? "Approved" : "Rejected";
                       return (
                         <li key={nomination.id} className="flex flex-col gap-4 rounded-md border border-slate-700/60 bg-slate-800/70 p-4 lg:flex-row lg:items-center lg:justify-between">
                           <div className="flex min-w-0 items-center gap-4">
@@ -174,6 +171,7 @@ const NominationsTab: React.FC<NominationsTabProps> = ({
                               <div className="mt-1 flex flex-wrap gap-2 text-xs">
                                 {nomination.popularName && <span className="rounded bg-slate-950 px-2 py-1 text-slate-300">{nomination.popularName}</span>}
                                 {duplicateCount > 1 && <span className="rounded bg-amber-500/15 px-2 py-1 font-bold text-amber-300">Nominated {duplicateCount} times</span>}
+                                <span className={`rounded px-2 py-1 font-bold ${pendingCount > 0 ? "bg-amber-500/15 text-amber-300" : reviewState === "Approved" ? "bg-green-500/15 text-green-300" : "bg-red-500/15 text-red-300"}`}>{reviewState}</span>
                               </div>
                             </div>
                           </div>
@@ -184,12 +182,12 @@ const NominationsTab: React.FC<NominationsTabProps> = ({
                                 {copiedId === nomination.id ? <><Check size={14} /> Copied</> : <><LinkIcon size={14} /> Image URL</>}
                               </button>
                             )}
-                            <button type="button" onClick={() => handleApprove(nomination.id)} disabled={!!processingId} className="flex min-h-10 items-center gap-1.5 rounded-md bg-green-600 px-3 py-2 text-xs font-bold text-white hover:bg-green-500 disabled:cursor-wait disabled:opacity-50">
+                            {pendingCount > 0 && <button type="button" onClick={() => handleApprove(nomination.id)} disabled={!!processingId} className="flex min-h-10 items-center gap-1.5 rounded-md bg-green-600 px-3 py-2 text-xs font-bold text-white hover:bg-green-500 disabled:cursor-wait disabled:opacity-50">
                               {isMutating ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle size={14} />} Approve
-                            </button>
-                            <button type="button" onClick={() => handleReject(nomination.id)} disabled={!!processingId} className="flex min-h-10 items-center gap-1.5 rounded-md bg-red-600 px-3 py-2 text-xs font-bold text-white hover:bg-red-500 disabled:cursor-wait disabled:opacity-50">
+                            </button>}
+                            {pendingCount > 0 && <button type="button" onClick={() => handleReject(nomination.id)} disabled={!!processingId} className="flex min-h-10 items-center gap-1.5 rounded-md bg-red-600 px-3 py-2 text-xs font-bold text-white hover:bg-red-500 disabled:cursor-wait disabled:opacity-50">
                               {isMutating ? <Loader2 className="animate-spin" size={14} /> : <XCircle size={14} />} Reject
-                            </button>
+                            </button>}
                           </div>
                         </li>
                       );

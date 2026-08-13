@@ -29,7 +29,7 @@ import type {
   CategoryResult,
   CategoryInfo,
   DepartmentInfo,
-  Nomination,
+  NominationCategory,
   ModalState,
   ElectionSetup,
   PositionSetup,
@@ -49,9 +49,7 @@ const AdminPage = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [categories, setCategories] = useState<CategoryInfo[]>([]);
   const [departments, setDepartments] = useState<DepartmentInfo[]>([]);
-  const [pendingNominations, setPendingNominations] = useState<Nomination[]>(
-    []
-  );
+  const [nominationCategoryGroups, setNominationCategoryGroups] = useState<NominationCategory[]>([]);
   const [nominationTotal, setNominationTotal] = useState(0);
   const [nominationSubmissionTotal, setNominationSubmissionTotal] = useState(0);
   const [nominationPage, setNominationPage] = useState(1);
@@ -118,7 +116,7 @@ const AdminPage = () => {
         authHeaders(token),
       );
       const totalPages = Math.max(1, response.data.totalPages || 1);
-      setPendingNominations(response.data.nominations || []);
+      setNominationCategoryGroups(response.data.categories || []);
       setNominationTotal(response.data.total || 0);
       setNominationSubmissionTotal(response.data.submissionTotal || 0);
       setNominationTotalPages(totalPages);
@@ -1013,7 +1011,7 @@ const AdminPage = () => {
         )}
         {activeTab === "nominations" && (
           <NominationsTab
-            pendingNominations={pendingNominations}
+            categoryGroups={nominationCategoryGroups}
             total={nominationTotal}
             submissionTotal={nominationSubmissionTotal}
             page={nominationPage}

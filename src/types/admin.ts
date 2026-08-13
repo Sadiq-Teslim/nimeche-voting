@@ -32,7 +32,16 @@ export interface Nomination {
   category: string;
   imageUrl?: string;
   nominationCount?: number;
+  approvedCount?: number;
+  pendingCount?: number;
+  rejectedCount?: number;
   submittedAt?: string;
+}
+export interface NominationCategory {
+  id: string;
+  title: string;
+  sortOrder?: number;
+  nominations: Nomination[];
 }
 export interface ModalState {
   isOpen: boolean;
