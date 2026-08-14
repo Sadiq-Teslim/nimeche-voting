@@ -284,7 +284,7 @@ const VotingPage: React.FC<VotingPageProps> = ({ voter, groupKey, selections, se
       <SuccessModal isOpen={isSuccessOpen} message={successMessage} onClose={() => { setIsSuccessOpen(false); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
       <ImageZoomModal nominee={zoomedNominee} onClose={() => setZoomedNominee(null)} />
 
-      <header className="sticky top-0 z-30 border-b bg-[#0A0D0A]/95 backdrop-blur-md" style={{ borderColor: brand.border }}>
+      <header className="fixed left-0 right-0 top-0 z-40 border-b bg-[#0A0D0A]/95 backdrop-blur-md sm:sticky" style={{ borderColor: brand.border }}>
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <Link href="/vote" aria-label="Back to voting categories" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors hover:bg-white/5" style={{ borderColor: brand.border, color: brand.secondary }}>
@@ -304,7 +304,7 @@ const VotingPage: React.FC<VotingPageProps> = ({ voter, groupKey, selections, se
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto w-full max-w-7xl px-4 py-8 sm:px-8 sm:py-12">
+      <main className="relative z-10 mx-auto w-full max-w-7xl px-4 pb-8 pt-36 sm:px-8 sm:py-12">
         <section className="border-b pb-8" style={{ borderColor: brand.border }}>
           <Link href="/vote" className="inline-flex items-center gap-2 text-sm font-bold" style={{ color: brand.gold }}><ArrowLeft size={17} /> All voting categories</Link>
           <p className="mt-6 text-xs font-bold uppercase tracking-[0.18em]" style={{ color: brand.orange }}>Official Ballot</p>
