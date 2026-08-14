@@ -141,7 +141,7 @@ const VotingPage: React.FC<VotingPageProps> = ({ voter, groupKey, selections, se
   const [isSuccessOpen, setIsSuccessOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [zoomedNominee, setZoomedNominee] = useState<Nominee | null>(null);
-  const [expandedCategoryId, setExpandedCategoryId] = useState<string | null>(null);
+  const [collapsedCategoryIds, setCollapsedCategoryIds] = useState<Set<string>>(() => new Set());
   const fingerprintRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -334,7 +334,7 @@ const VotingPage: React.FC<VotingPageProps> = ({ voter, groupKey, selections, se
                 <div className="space-y-8">
                   {group.categories.map((category) => {
                     const voted = votedCategoryIds.includes(category.id);
-                    const expanded = expandedCategoryId === category.id;
+                    const expanded = !collapsedCategoryIds.has(category.id);
                     const selected = Boolean(selections[category.id]);
                     return (
                       <article key={category.id} className="rounded-lg border p-4 sm:p-6" style={{ backgroundColor: "rgba(8,14,7,0.72)", borderColor: brand.border }}>
@@ -349,7 +349,12 @@ const VotingPage: React.FC<VotingPageProps> = ({ voter, groupKey, selections, se
                             {voted && <span className="hidden items-center gap-1.5 rounded-md bg-[#2E7D32]/20 px-3 py-1.5 text-xs font-bold text-green-300 min-[420px]:inline-flex"><Check size={15} /> Completed</span>}
                             <button
                               type="button"
-                              onClick={() => setExpandedCategoryId((current) => current === category.id ? null : category.id)}
+                              onClick={() => setCollapsedCategoryIds((current) => {
+                                const next = new Set(current);
+                                if (next.has(category.id)) next.delete(category.id);
+                                else next.add(category.id);
+                                return next;
+                              })}
                               className="flex h-11 w-11 items-center justify-center rounded-md border transition-colors hover:bg-white/5 sm:hidden"
                               style={{ borderColor: brand.border, color: expanded ? brand.gold : brand.secondary }}
                               aria-expanded={expanded}
