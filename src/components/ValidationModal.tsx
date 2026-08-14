@@ -17,7 +17,7 @@ const ValidationModal: React.FC<ValidationModalProps> = ({
   onSuccess,
 }) => {
   const [matricNumber, setMatricNumber] = useState("");
-  const [surname, setSurname] = useState("");
+  const [verificationName, setVerificationName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,7 +31,7 @@ const ValidationModal: React.FC<ValidationModalProps> = ({
     setIsLoading(true);
     setError(null);
     try {
-      const response = await api.post("/validate", { matricNumber, surname });
+      const response = await api.post("/validate", { matricNumber, verificationName });
       if (response.data.valid) {
         onSuccess({
           fullName: response.data.fullName,
@@ -103,21 +103,21 @@ const ValidationModal: React.FC<ValidationModalProps> = ({
               </div>
               <div>
                 <label
-                  htmlFor="surname"
+                  htmlFor="verificationName"
                   className="block text-sm font-medium text-[#BDD0BE] mb-1.5"
                 >
-                  Surname
+                  One of Your Names
                 </label>
                 <input
                   type="text"
-                  id="surname"
-                  value={surname}
-                  onChange={(e) => setSurname(e.target.value)}
+                  id="verificationName"
+                  value={verificationName}
+                  onChange={(e) => setVerificationName(e.target.value)}
                   required
-                  autoComplete="family-name"
+                  autoComplete="name"
                   maxLength={80}
                   className="w-full bg-black/30 border border-[#E8650A]/35 rounded-md px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-[#E8650A]/35 focus:border-[#E8650A]"
-                  placeholder="Enter your surname"
+                  placeholder="Enter any name on your class record"
                 />
               </div>
             </div>

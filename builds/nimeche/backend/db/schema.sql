@@ -70,6 +70,7 @@ create table if not exists eligible_voters (
     surname text not null,
     surname_key text not null,
     full_name text not null,
+    name_keys text[] not null default '{}',
     level text,
     source_label text,
     is_active boolean not null default true,

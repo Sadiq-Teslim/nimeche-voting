@@ -22,7 +22,7 @@ function normalizeMatricNumber(value) {
     return typeof value === 'string' ? value.replace(/[\s/-]/g, '') : ''
 }
 
-function normalizeSurname(value) {
+function normalizeName(value) {
     if (typeof value !== 'string') return ''
     return value
         .normalize('NFKD')
@@ -212,10 +212,10 @@ router.get('/voted-categories', requireVoter, async (req, res) => {
 router.post('/validate', voterValidationLimiter, async (req, res) => {
     const orgId = getOrgId()
     const matricNumber = normalizeMatricNumber(req.body.matricNumber)
-    const surnameKey = normalizeSurname(req.body.surname)
-    const invalidMessage = 'We could not verify those details. Check your matric number and surname.'
+    const nameKey = normalizeName(req.body.verificationName || req.body.surname)
+    const invalidMessage = 'We could not verify those details. Check your matric number and name.'
 
-    if (!/^\d{2}0404\d{3}$/.test(matricNumber) || surnameKey.length < 2 || surnameKey.length > 80) {
+    if (!/^\d{9}$/.test(matricNumber) || nameKey.length < 2 || nameKey.length > 160) {
         return res.status(400).json({ valid: false, message: invalidMessage })
     }
 
@@ -229,10 +229,10 @@ router.post('/validate', voterValidationLimiter, async (req, res) => {
              where organization_id = $1
                and election_id = $2
                and matric_number = $3
-               and surname_key = $4
+               and $4 = any(name_keys)
                and is_active = true
              limit 1`,
-            [orgId, electionId, matricNumber, surnameKey]
+            [orgId, electionId, matricNumber, nameKey]
         )
         const voter = result.rows[0]
         if (!voter) return res.status(400).json({ valid: false, message: invalidMessage })

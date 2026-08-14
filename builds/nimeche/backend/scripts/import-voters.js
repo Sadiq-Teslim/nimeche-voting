@@ -12,14 +12,24 @@ function normalizeSurname(value) {
         .replace(/[^a-z0-9]/g, '')
 }
 
+function buildNameKeys(fullName, surname) {
+    const normalized = `${fullName} ${surname}`
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+    const tokens = normalized.match(/[a-z0-9]+/g) || []
+    const fullNameKey = normalizeSurname(fullName)
+    return [...new Set([...tokens, fullNameKey].filter(key => key.length >= 2))]
+}
+
 function validateRecord(record, index) {
     const matricNumber = String(record.matricNumber || '').trim()
     const surname = String(record.surname || '').trim()
     const fullName = String(record.fullName || '').trim()
     const surnameKey = normalizeSurname(surname)
 
-    if (!/^\d{2}0404\d{3}$/.test(matricNumber)) {
-        throw new Error(`Record ${index + 1} has an invalid Mechanical Engineering matric number.`)
+    if (!/^\d{9}$/.test(matricNumber)) {
+        throw new Error(`Record ${index + 1} has an invalid nine-digit matric number.`)
     }
     if (!surnameKey || !fullName) {
         throw new Error(`Record ${index + 1} is missing a surname or full name.`)
@@ -30,6 +40,7 @@ function validateRecord(record, index) {
         surname,
         surnameKey,
         fullName,
+        nameKeys: buildNameKeys(fullName, surname),
         level: record.level ? String(record.level) : null,
         sourceLabel: record.sourceLabel ? String(record.sourceLabel) : null,
     }
@@ -60,15 +71,16 @@ async function main() {
         const result = await client.query(
             `insert into eligible_voters (
                 organization_id, election_id, matric_number, surname, surname_key,
-                full_name, level, source_label, is_active, updated_at
+                full_name, name_keys, level, source_label, is_active, updated_at
              )
              select $1, $2, record.matric_number, record.surname, record.surname_key,
-                    record.full_name, record.level, record.source_label, true, now()
+                    record.full_name, record.name_keys, record.level, record.source_label, true, now()
              from jsonb_to_recordset($3::jsonb) as record(
                 matric_number text,
                 surname text,
                 surname_key text,
                 full_name text,
+                name_keys text[],
                 level text,
                 source_label text
              )
@@ -76,6 +88,7 @@ async function main() {
                 surname = excluded.surname,
                 surname_key = excluded.surname_key,
                 full_name = excluded.full_name,
+                name_keys = excluded.name_keys,
                 level = excluded.level,
                 source_label = excluded.source_label,
                 is_active = true,
@@ -89,6 +102,7 @@ async function main() {
                     surname: record.surname,
                     surname_key: record.surnameKey,
                     full_name: record.fullName,
+                    name_keys: record.nameKeys,
                     level: record.level,
                     source_label: record.sourceLabel,
                 }))),
