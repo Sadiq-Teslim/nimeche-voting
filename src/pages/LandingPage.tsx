@@ -10,6 +10,12 @@ interface LandingPageProps {
   setVoter: (voter: VoterInfo) => void;
 }
 
+type PortalMode = "nominations" | "voting";
+
+const configuredPortalMode: PortalMode = organization.portalMode === "nominations"
+  ? "nominations"
+  : "voting";
+
 // ── NIMechE colour tokens ─────────────────────────────────────────────────────
 const brand = {
   bg: "#0A0D0A",
@@ -25,7 +31,7 @@ const brand = {
 };
 
 const LandingPage: React.FC<LandingPageProps> = ({ setVoter }) => {
-  const [portalMode, setPortalMode] = useState<"nominations" | "voting">("nominations");
+  const [portalMode, setPortalMode] = useState<PortalMode>(configuredPortalMode);
   const isNominationPortal = portalMode === "nominations";
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [, setLocation] = useLocation();
@@ -37,7 +43,9 @@ const LandingPage: React.FC<LandingPageProps> = ({ setVoter }) => {
       .get("/election-status")
       .then((res) => {
         setElectionStatus(res.data.status);
-        setPortalMode(res.data.portalMode || "nominations");
+        if (res.data.portalMode === "nominations" || res.data.portalMode === "voting") {
+          setPortalMode(res.data.portalMode);
+        }
       })
       .catch(() => setElectionStatus("closed"));
   }, []);

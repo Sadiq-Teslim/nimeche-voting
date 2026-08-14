@@ -42,7 +42,7 @@ export default {
     fontUrl: null,
     fontFamily: "'DM Sans', system-ui, sans-serif",
     displayFontFamily: "'DM Serif Display', Georgia, serif",
-    portalMode: "nominations",
+    portalMode: "voting",
     fixedDepartmentId: "nimeche",
     voterRequiresDepartment: false,
     categoryGroups: {
@@ -70,7 +70,7 @@ export default {
       title: "NIMechE UNILAG SYMPOSIUM 3.0 AWARDS NIGHT",
       year: "2026",
       status: "closed",
-      portalMode: "nominations",
+      portalMode: "voting",
     },
     departments: [
       { id: "nimeche", title: "NIMechE UNILAG SF", sortOrder: 1 },

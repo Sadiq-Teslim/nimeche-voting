@@ -10,7 +10,7 @@ export const organization = {
   "fontUrl": null,
   "fontFamily": "'DM Sans', system-ui, sans-serif",
   "displayFontFamily": "'DM Serif Display', Georgia, serif",
-  "portalMode": "nominations",
+  "portalMode": "voting",
   "fixedDepartmentId": "nimeche",
   "voterRequiresDepartment": false,
   "categoryGroups": {
