@@ -12,21 +12,47 @@ router.use(requireAdmin)
 router.post('/results', async (req, res) => {
     try {
         const result = await query(
-            `select
-                v.position_id as category,
+            `with current_election as (
+                select id
+                from elections
+                where organization_id = $1
+                order by created_at desc
+                limit 1
+             )
+             select
+                p.id as category,
                 c.name,
-                count(*)::int as votes
-             from votes v
-             join candidates c on c.id = v.candidate_id
-             where v.organization_id = $1
-             group by v.position_id, c.name
-             order by v.position_id, votes desc, c.name`,
+                count(v.id)::int as votes
+             from positions p
+             left join current_election e on true
+             left join candidates c
+               on c.organization_id = p.organization_id
+              and c.election_id = e.id
+              and c.position_id = p.id
+              and (
+                  c.status = 'approved'
+                  or exists (
+                      select 1 from votes recorded_vote
+                      where recorded_vote.organization_id = p.organization_id
+                        and recorded_vote.election_id = e.id
+                        and recorded_vote.position_id = p.id
+                        and recorded_vote.candidate_id = c.id
+                  )
+              )
+             left join votes v
+               on v.organization_id = p.organization_id
+              and v.election_id = e.id
+              and v.position_id = p.id
+              and v.candidate_id = c.id
+             where p.organization_id = $1
+             group by p.sort_order, p.id, c.id, c.name
+             order by p.sort_order, p.id, votes desc, c.name`,
             [getOrgId()]
         )
         const grouped = new Map()
         for (const row of result.rows) {
             const nominees = grouped.get(row.category) || []
-            nominees.push({ name: row.name, votes: row.votes })
+            if (row.name) nominees.push({ name: row.name, votes: row.votes })
             grouped.set(row.category, nominees)
         }
         res.json(Array.from(grouped.entries()).map(([category, nominees]) => ({ category, nominees })))

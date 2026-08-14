@@ -37,8 +37,8 @@ const TabularAccordion = ({
                 {getCategoryTitle(result.category)}
               </h3>
               <ul className="space-y-1">
-                {result.nominees
-                  .sort((a, b) => b.votes - a.votes) // Sort by votes descending
+                {[...result.nominees]
+                  .sort((a, b) => b.votes - a.votes)
                   .map((nominee, index) => (
                     <li
                       key={nominee.name}
