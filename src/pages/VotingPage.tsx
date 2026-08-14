@@ -102,7 +102,7 @@ const CandidateCard = ({ nominee, selected, disabled, onSelect, onImageClick }: 
 }) => {
   const imageSrc = nominee.image
     ? nominee.image.startsWith("http") ? nominee.image : `/nominees/${nominee.image}`
-    : "/placeholder.png";
+    : "/brand/nominee-placeholder-v2.png";
 
   return (
     <article

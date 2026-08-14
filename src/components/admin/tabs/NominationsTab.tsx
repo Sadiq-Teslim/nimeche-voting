@@ -165,7 +165,7 @@ const NominationsTab: React.FC<NominationsTabProps> = ({
                       return (
                         <li key={nomination.id} className="flex flex-col gap-4 rounded-md border border-slate-700/60 bg-slate-800/70 p-4 lg:flex-row lg:items-center lg:justify-between">
                           <div className="flex min-w-0 items-center gap-4">
-                            <img src={nomination.imageUrl || "/placeholder.png"} alt="" className="h-14 w-14 shrink-0 rounded-full border border-slate-600 object-cover" />
+                            <img src={nomination.imageUrl || "/brand/nominee-placeholder-v2.png"} alt="" className="h-14 w-14 shrink-0 rounded-full border border-slate-600 object-cover" />
                             <div className="min-w-0">
                               <p className="break-words text-lg font-semibold text-white">{nomination.fullName}</p>
                               <div className="mt-1 flex flex-wrap gap-2 text-xs">
