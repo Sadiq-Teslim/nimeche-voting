@@ -8,6 +8,13 @@ const votingRoutes = require('./voting')
 const adminRoutes = require('./admin')
 const nominationRoutes = require('./nominations')
 
+function ballotGroupKey(position) {
+    if (position.id.startsWith('level-')) return 'level'
+    if (position.id.startsWith('dept-')) return 'department'
+    if (position.group_key === 'departmental') return 'department'
+    return position.group_key
+}
+
 // Apply global rate limiter to all API routes
 router.use(globalLimiter)
 
@@ -142,21 +149,15 @@ router.get('/ballot', async (req, res) => {
             title: department.title,
             subcategories: [],
         }))
-        const departmentMap = new Map(departments.map(department => [department.id, department]))
-
         for (const position of positionsRes.rows) {
+            const groupKey = ballotGroupKey(position)
             const category = {
                 id: position.id,
                 title: position.title,
-                groupKey: position.group_key,
+                groupKey,
                 nominees: candidatesByPosition.get(position.id) || [],
             }
-            if (position.group_key === 'departmental' && position.department_id) {
-                const department = departmentMap.get(position.department_id)
-                if (department) department.subcategories.push(category)
-            } else {
-                categories.push(category)
-            }
+            categories.push(category)
         }
 
         res.json({ categories, departments })
