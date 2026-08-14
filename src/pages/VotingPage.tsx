@@ -53,18 +53,18 @@ async function getCsrfToken(): Promise<string> {
   return cachedCsrfToken as string;
 }
 
-async function postVotesWithFreshCsrf(payload: unknown) {
+async function postVotesWithFreshCsrf(payload: unknown, voterToken: string) {
   const csrfToken = await getCsrfToken();
   try {
     return await retryWithBackoff(() =>
-      api.post("/submit-votes", payload, { headers: { "X-CSRF-Token": csrfToken } }),
+      api.post("/submit-votes", payload, { headers: { "X-CSRF-Token": csrfToken, "X-Voter-Token": voterToken } }),
     );
   } catch (error: any) {
     if (error.response?.status !== 403) throw error;
     cachedCsrfToken = null;
     const freshToken = await getCsrfToken();
     return retryWithBackoff(() =>
-      api.post("/submit-votes", payload, { headers: { "X-CSRF-Token": freshToken } }),
+      api.post("/submit-votes", payload, { headers: { "X-CSRF-Token": freshToken, "X-Voter-Token": voterToken } }),
     );
   }
 }
@@ -148,7 +148,7 @@ const VotingPage: React.FC<{ voter: VoterInfo; groupKey: string }> = ({ voter, g
           generateFingerprint(),
         ]);
         fingerprintRef.current = fingerprint;
-        const votedResponse = await retryWithBackoff(() => api.get("/voted-categories", { params: { fingerprint } }));
+        const votedResponse = await retryWithBackoff(() => api.get("/voted-categories", { headers: { "X-Voter-Token": voter.voterToken } }));
         const departmentCategories = (ballotResponse.data.departments || []).flatMap((department: any) => department.subcategories || []);
         setCategories([...(ballotResponse.data.categories || []), ...departmentCategories]);
         setVotedCategoryIds(votedResponse.data.votedCategoryIds || []);
@@ -159,7 +159,7 @@ const VotingPage: React.FC<{ voter: VoterInfo; groupKey: string }> = ({ voter, g
       }
     };
     fetchBallot();
-  }, [groupKey]);
+  }, [groupKey, voter.voterToken]);
 
   const ballotGroups = useMemo<BallotGroup[]>(() => {
     const groupLabels = organization.categoryGroups || {};
@@ -222,12 +222,12 @@ const VotingPage: React.FC<{ voter: VoterInfo; groupKey: string }> = ({ voter, g
         fingerprint,
         department: organization.fixedDepartmentId || voter.department,
         choices: Object.entries(selections).map(([categoryId, candidateId]) => ({ categoryId, candidateId })),
-      });
+      }, voter.voterToken);
       setVotedCategoryIds(response.data.votedCategoryIds || []);
       setSelections({});
       const recordedCount = response.data.recorded?.length || 0;
       const skippedCount = response.data.skipped?.length || 0;
-      if (recordedCount === 0 && skippedCount > 0) setSuccessMessage("Those awards were already completed on this device.");
+      if (recordedCount === 0 && skippedCount > 0) setSuccessMessage("You have already voted in those awards.");
       else if (skippedCount > 0) setSuccessMessage(`${recordedCount} vote(s) recorded. ${skippedCount} previously completed award(s) were skipped.`);
       else setSuccessMessage(`${recordedCount} vote(s) recorded successfully.`);
       setIsSuccessOpen(true);
@@ -238,7 +238,7 @@ const VotingPage: React.FC<{ voter: VoterInfo; groupKey: string }> = ({ voter, g
     }
   };
 
-  if (!voter.fullName) return <Redirect to="/" />;
+  if (!voter.fullName || !voter.voterToken) return <Redirect to="/" />;
   if (!(groupKey in organization.categoryGroups)) return <Redirect to="/vote" />;
   const currentGroupLabel = organization.categoryGroups[groupKey as keyof typeof organization.categoryGroups];
   const backgroundImage = organization.nominationBackground ? `url("${assetUrl(organization.nominationBackground)}")` : undefined;
@@ -300,7 +300,7 @@ const VotingPage: React.FC<{ voter: VoterInfo; groupKey: string }> = ({ voter, g
           </p>
           <div className="mt-6 flex flex-wrap gap-3 text-sm">
             <span className="rounded-md border px-3 py-2" style={{ borderColor: brand.border, color: brand.secondary }}>{availableCategoryCount} awards with nominees</span>
-            <span className="rounded-md border px-3 py-2" style={{ borderColor: brand.border, color: brand.secondary }}>{completedCount} completed on this device</span>
+            <span className="rounded-md border px-3 py-2" style={{ borderColor: brand.border, color: brand.secondary }}>{completedCount} completed by you</span>
           </div>
         </section>
 
@@ -323,7 +323,7 @@ const VotingPage: React.FC<{ voter: VoterInfo; groupKey: string }> = ({ voter, g
                         <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
                           <div>
                             <h3 className="text-xl font-bold" style={{ color: brand.text }}>{category.title}</h3>
-                            <p className="mt-1 text-sm" style={{ color: brand.muted }}>{voted ? "Voting completed on this device" : `${category.nominees.length} approved nominee${category.nominees.length === 1 ? "" : "s"}`}</p>
+                            <p className="mt-1 text-sm" style={{ color: brand.muted }}>{voted ? "You have completed this award" : `${category.nominees.length} approved nominee${category.nominees.length === 1 ? "" : "s"}`}</p>
                           </div>
                           {voted && <span className="inline-flex items-center gap-1.5 rounded-md bg-[#2E7D32]/20 px-3 py-1.5 text-xs font-bold text-green-300"><Check size={15} /> Completed</span>}
                         </div>

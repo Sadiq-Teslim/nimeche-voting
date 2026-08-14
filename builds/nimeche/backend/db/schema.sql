@@ -62,16 +62,32 @@ create table if not exists nominations (
     submitted_at timestamptz not null default now()
 );
 
+create table if not exists eligible_voters (
+    id uuid primary key default gen_random_uuid(),
+    organization_id text not null references organizations(id) on delete cascade,
+    election_id uuid not null references elections(id) on delete cascade,
+    matric_number text not null,
+    surname text not null,
+    surname_key text not null,
+    full_name text not null,
+    level text,
+    source_label text,
+    is_active boolean not null default true,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    unique (election_id, matric_number)
+);
+
 create table if not exists votes (
     id uuid primary key default gen_random_uuid(),
     organization_id text not null references organizations(id) on delete cascade,
     election_id uuid not null references elections(id) on delete cascade,
+    eligible_voter_id uuid references eligible_voters(id) on delete restrict,
     voter_fingerprint text not null,
     department_id text not null,
     position_id text not null references positions(id) on delete cascade,
     candidate_id uuid not null references candidates(id) on delete restrict,
-    created_at timestamptz not null default now(),
-    unique (election_id, voter_fingerprint, position_id)
+    created_at timestamptz not null default now()
 );
 
 create table if not exists settings (
@@ -86,4 +102,10 @@ create index if not exists candidates_position_idx on candidates(position_id);
 create unique index if not exists candidates_election_position_name_idx
     on candidates(election_id, position_id, lower(name));
 create index if not exists nominations_status_idx on nominations(organization_id, status, submitted_at desc);
+create index if not exists eligible_voters_lookup_idx
+    on eligible_voters(organization_id, election_id, matric_number, surname_key)
+    where is_active = true;
 create index if not exists votes_results_idx on votes(election_id, position_id, candidate_id);
+create unique index if not exists votes_verified_voter_position_idx
+    on votes(election_id, eligible_voter_id, position_id)
+    where eligible_voter_id is not null;

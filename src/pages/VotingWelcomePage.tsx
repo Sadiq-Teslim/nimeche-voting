@@ -6,13 +6,13 @@ import {
   CheckCircle2,
   GraduationCap,
   Loader2,
+  LogOut,
   ShieldCheck,
 } from "lucide-react";
 import { api, assetUrl } from "../api/client";
 import { organization } from "../config/organization";
 import type { VoterInfo } from "../App";
 import type { Category } from "./VotingPage";
-import { generateFingerprint } from "../utils/fingerprint";
 import { retryWithBackoff } from "../utils/retry";
 
 interface VotingGroup {
@@ -44,7 +44,7 @@ const groupDetails: Record<string, { description: string; icon: typeof Graduatio
   },
 };
 
-const VotingWelcomePage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
+const VotingWelcomePage: React.FC<{ voter: VoterInfo; onSignOut: () => void }> = ({ voter, onSignOut }) => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [votedCategoryIds, setVotedCategoryIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -54,12 +54,9 @@ const VotingWelcomePage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
     document.title = `${organization.electionTitle} | Choose a Ballot`;
     const fetchOverview = async () => {
       try {
-        const [ballotResponse, fingerprint] = await Promise.all([
-          retryWithBackoff(() => api.get("/ballot")),
-          generateFingerprint(),
-        ]);
+        const ballotResponse = await retryWithBackoff(() => api.get("/ballot"));
         const votedResponse = await retryWithBackoff(() =>
-          api.get("/voted-categories", { params: { fingerprint } }),
+          api.get("/voted-categories", { headers: { "X-Voter-Token": voter.voterToken } }),
         );
         const departmentCategories = (ballotResponse.data.departments || []).flatMap(
           (department: { subcategories?: Category[] }) => department.subcategories || [],
@@ -73,7 +70,7 @@ const VotingWelcomePage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
       }
     };
     fetchOverview();
-  }, []);
+  }, [voter.voterToken]);
 
   const groups = useMemo<VotingGroup[]>(
     () =>
@@ -85,7 +82,7 @@ const VotingWelcomePage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
     [categories],
   );
 
-  if (!voter.fullName) return <Redirect to="/" />;
+  if (!voter.fullName || !voter.voterToken) return <Redirect to="/" />;
 
   const backgroundImage = organization.nominationBackground
     ? `url("${assetUrl(organization.nominationBackground)}")`
@@ -97,12 +94,17 @@ const VotingWelcomePage: React.FC<{ voter: VoterInfo }> = ({ voter }) => {
       <div aria-hidden="true" className="fixed inset-0 bg-[rgba(10,13,10,0.86)]" />
 
       <header className="relative z-10 border-b" style={{ borderColor: brand.border }}>
-        <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-4 sm:px-8">
-          <img src={assetUrl(organization.logo)} alt="" className="h-11 w-11 shrink-0 object-contain" />
-          <div className="min-w-0">
-            <p className="truncate text-sm font-bold" style={{ color: brand.text }}>{organization.shortName}</p>
-            <p className="text-xs" style={{ color: brand.muted }}>Official 2026 voting portal</p>
+        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 px-4 py-4 sm:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <img src={assetUrl(organization.logo)} alt="" className="h-11 w-11 shrink-0 object-contain" />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold" style={{ color: brand.text }}>{organization.shortName}</p>
+              <p className="text-xs" style={{ color: brand.muted }}>Official 2026 voting portal</p>
+            </div>
           </div>
+          <button type="button" onClick={onSignOut} className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-md border px-3 text-xs font-bold transition-colors hover:bg-white/5 sm:text-sm" style={{ borderColor: brand.border, color: brand.secondary }}>
+            <LogOut size={16} /> <span className="hidden sm:inline">Verify another student</span><span className="sm:hidden">Switch voter</span>
+          </button>
         </div>
       </header>
 

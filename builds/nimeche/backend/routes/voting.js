@@ -1,29 +1,34 @@
-// routes/voting.js — Voting endpoints (fingerprint + cookie based)
+// routes/voting.js — Roster-verified voting endpoints
 const express = require('express')
 const router = express.Router()
 const { query, transaction } = require('../db')
-const { getOrgId, voteLimiter, csrfProtection, issueCsrfToken, votedCookieName, getElectionStatus, getPortalMode } = require('./middleware')
+const {
+    getOrgId,
+    voteLimiter,
+    voterValidationLimiter,
+    csrfProtection,
+    issueCsrfToken,
+    getElectionStatus,
+    getPortalMode,
+    requireVoter,
+    issueVoterToken,
+} = require('./middleware')
 
 function isValidFingerprint(fingerprint) {
     return typeof fingerprint === 'string' && fingerprint.length >= 8 && fingerprint.length <= 64
 }
 
-function parseVotedCookie(req) {
-    const votedCookie = req.cookies[votedCookieName()] || ''
-    return votedCookie
-        ? votedCookie.split(',').map(id => id.trim()).filter(Boolean)
-        : []
+function normalizeMatricNumber(value) {
+    return typeof value === 'string' ? value.replace(/[\s/-]/g, '') : ''
 }
 
-function setVotedCookie(res, categoryIds) {
-    const isProduction = process.env.NODE_ENV === 'production'
-    res.cookie(votedCookieName(), [...new Set(categoryIds)].filter(Boolean).join(','), {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: isProduction ? 'none' : 'lax',
-        maxAge: 365 * 24 * 60 * 60 * 1000,
-        path: '/',
-    })
+function normalizeSurname(value) {
+    if (typeof value !== 'string') return ''
+    return value
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '')
 }
 
 async function getCurrentElectionId(orgId) {
@@ -34,10 +39,10 @@ async function getCurrentElectionId(orgId) {
     return electionRes.rows[0]?.id || null
 }
 
-async function getDbVotedCategoryIds(orgId, electionId, fingerprint, categoryIds = []) {
-    if (!isValidFingerprint(fingerprint) || !electionId) return []
+async function getDbVotedCategoryIds(orgId, electionId, voterId, categoryIds = []) {
+    if (!voterId || !electionId) return []
 
-    const params = [orgId, electionId, fingerprint]
+    const params = [orgId, electionId, voterId]
     let categoryFilter = ''
     if (categoryIds.length > 0) {
         params.push(categoryIds)
@@ -49,7 +54,7 @@ async function getDbVotedCategoryIds(orgId, electionId, fingerprint, categoryIds
          from votes
          where organization_id = $1
            and election_id = $2
-           and voter_fingerprint = $3
+           and eligible_voter_id = $3
            ${categoryFilter}
          order by created_at asc`,
         params
@@ -63,7 +68,7 @@ router.get('/csrf-token', (req, res) => {
 })
 
 // Submit votes — immediate, no email verification
-router.post('/submit-votes', voteLimiter, csrfProtection, async (req, res) => {
+router.post('/submit-votes', voteLimiter, csrfProtection, requireVoter, async (req, res) => {
     const { fingerprint, department, choices } = req.body
     const orgId = getOrgId()
 
@@ -104,11 +109,21 @@ router.post('/submit-votes', voteLimiter, csrfProtection, async (req, res) => {
         return res.status(403).json({ message: 'The portal is not currently accepting votes.' })
     }
 
-    const cookieVotedIds = parseVotedCookie(req)
-
     try {
         const electionId = await getCurrentElectionId(orgId)
         if (!electionId) return res.status(400).json({ message: 'No active election configured.' })
+        if (req.voter.electionId !== electionId) {
+            return res.status(401).json({ message: 'Please verify your voter details again.' })
+        }
+
+        const voterRes = await query(
+            `select id from eligible_voters
+             where id = $1 and organization_id = $2 and election_id = $3 and is_active = true`,
+            [req.voter.id, orgId, electionId]
+        )
+        if (voterRes.rowCount === 0) {
+            return res.status(401).json({ message: 'Please verify your voter details again.' })
+        }
 
         const departmentRes = await query(
             `select id from departments where organization_id = $1 and id = $2`,
@@ -119,8 +134,8 @@ router.post('/submit-votes', voteLimiter, csrfProtection, async (req, res) => {
         }
 
         const selectedCategoryIds = normalizedChoices.map(choice => choice.categoryId)
-        const dbVotedIds = await getDbVotedCategoryIds(orgId, electionId, fingerprint, selectedCategoryIds)
-        const alreadyVotedIds = new Set([...cookieVotedIds, ...dbVotedIds])
+        const dbVotedIds = await getDbVotedCategoryIds(orgId, electionId, req.voter.id, selectedCategoryIds)
+        const alreadyVotedIds = new Set(dbVotedIds)
 
         const recorded = await transaction(async client => {
             const inserted = []
@@ -151,20 +166,19 @@ router.post('/submit-votes', voteLimiter, csrfProtection, async (req, res) => {
                 if (!approvedCandidateId) continue
 
                 const voteRes = await client.query(
-                    `insert into votes (organization_id, election_id, voter_fingerprint, department_id, position_id, candidate_id)
-                     values ($1, $2, $3, $4, $5, $6)
-                     on conflict (election_id, voter_fingerprint, position_id) do nothing
+                    `insert into votes (organization_id, election_id, eligible_voter_id, voter_fingerprint, department_id, position_id, candidate_id)
+                     values ($1, $2, $3, $4, $5, $6, $7)
+                     on conflict (election_id, eligible_voter_id, position_id) where eligible_voter_id is not null do nothing
                      returning position_id`,
-                    [orgId, electionId, fingerprint, department, categoryId, approvedCandidateId]
+                    [orgId, electionId, req.voter.id, fingerprint, department, categoryId, approvedCandidateId]
                 )
                 if (voteRes.rowCount > 0) inserted.push(categoryId)
             }
             return inserted
         })
 
-        const latestDbVotedIds = await getDbVotedCategoryIds(orgId, electionId, fingerprint, selectedCategoryIds)
-        const allVotedIds = [...new Set([...cookieVotedIds, ...latestDbVotedIds, ...recorded])].filter(Boolean)
-        setVotedCookie(res, allVotedIds)
+        const latestDbVotedIds = await getDbVotedCategoryIds(orgId, electionId, req.voter.id)
+        const allVotedIds = [...new Set([...latestDbVotedIds, ...recorded])].filter(Boolean)
 
         res.status(201).json({
             success: true,
@@ -178,41 +192,66 @@ router.post('/submit-votes', voteLimiter, csrfProtection, async (req, res) => {
     }
 })
 
-// Get voted categories for this device. Cookie is fast, fingerprint-backed DB lookup is authoritative.
-router.get('/voted-categories', async (req, res) => {
+// The verified roster identity is authoritative across browsers and devices.
+router.get('/voted-categories', requireVoter, async (req, res) => {
     const orgId = getOrgId()
-    const cookieVotedIds = parseVotedCookie(req)
-    const fingerprint = req.query.fingerprint
 
     try {
         const electionId = await getCurrentElectionId(orgId)
-        const dbVotedIds = await getDbVotedCategoryIds(orgId, electionId, fingerprint)
-        const ids = [...new Set([...cookieVotedIds, ...dbVotedIds])].filter(Boolean)
-        if (ids.length > cookieVotedIds.length) setVotedCookie(res, ids)
-        res.json({ votedCategoryIds: ids })
+        if (!electionId || req.voter.electionId !== electionId) {
+            return res.status(401).json({ message: 'Please verify your voter details again.' })
+        }
+        const ids = await getDbVotedCategoryIds(orgId, electionId, req.voter.id)
+        res.json({ votedCategoryIds: [...new Set(ids)] })
     } catch (error) {
         console.error('Error loading voted categories:', error)
         res.status(500).json({ message: 'Server error.' })
     }
 })
 
-// Validate department (landing page entry)
-router.post('/validate', (req, res) => {
-    const { department } = req.body
-    query(
-        `select id from departments where organization_id = $1 and id = $2`,
-        [getOrgId(), department]
-    )
-        .then(result => {
-            if (result.rowCount === 0) {
-                return res.status(400).json({ valid: false, message: 'Invalid department.' })
-            }
-            res.json({ valid: true, departmentId: department })
+router.post('/validate', voterValidationLimiter, async (req, res) => {
+    const orgId = getOrgId()
+    const matricNumber = normalizeMatricNumber(req.body.matricNumber)
+    const surnameKey = normalizeSurname(req.body.surname)
+    const invalidMessage = 'We could not verify those details. Check your matric number and surname.'
+
+    if (!/^\d{2}0404\d{3}$/.test(matricNumber) || surnameKey.length < 2 || surnameKey.length > 80) {
+        return res.status(400).json({ valid: false, message: invalidMessage })
+    }
+
+    try {
+        const electionId = await getCurrentElectionId(orgId)
+        if (!electionId) return res.status(400).json({ valid: false, message: invalidMessage })
+
+        const result = await query(
+            `select id, full_name
+             from eligible_voters
+             where organization_id = $1
+               and election_id = $2
+               and matric_number = $3
+               and surname_key = $4
+               and is_active = true
+             limit 1`,
+            [orgId, electionId, matricNumber, surnameKey]
+        )
+        const voter = result.rows[0]
+        if (!voter) return res.status(400).json({ valid: false, message: invalidMessage })
+
+        const voterToken = issueVoterToken({
+            id: voter.id,
+            organizationId: orgId,
+            electionId,
         })
-        .catch(error => {
-            console.error('Error validating department:', error)
-            res.status(500).json({ message: 'Server error.' })
+        res.json({
+            valid: true,
+            fullName: voter.full_name,
+            departmentId: 'nimeche',
+            voterToken,
         })
+    } catch (error) {
+        console.error('Error validating voter:', error)
+        res.status(500).json({ message: 'Server error.' })
+    }
 })
 
 module.exports = router

@@ -16,22 +16,14 @@ const ValidationModal: React.FC<ValidationModalProps> = ({
   onClose,
   onSuccess,
 }) => {
-  const [department, setDepartment] = useState(organization.fixedDepartmentId || "");
-  const [fullName, setFullName] = useState("");
-  const [departments, setDepartments] = useState<{ id: string; title: string }[]>([]);
+  const [matricNumber, setMatricNumber] = useState("");
+  const [surname, setSurname] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
-    if (!organization.voterRequiresDepartment && organization.fixedDepartmentId) {
-      setDepartment(organization.fixedDepartmentId);
-      return;
-    }
-    api
-      .get("/departments")
-      .then((res) => setDepartments(res.data))
-      .catch(() => setDepartments([]));
+    setError(null);
   }, [isOpen]);
 
   const handleValidation = async (e: React.FormEvent) => {
@@ -39,11 +31,12 @@ const ValidationModal: React.FC<ValidationModalProps> = ({
     setIsLoading(true);
     setError(null);
     try {
-      const response = await api.post("/validate", { department });
+      const response = await api.post("/validate", { matricNumber, surname });
       if (response.data.valid) {
         onSuccess({
-          fullName,
-          department,
+          fullName: response.data.fullName,
+          department: response.data.departmentId || organization.fixedDepartmentId,
+          voterToken: response.data.voterToken,
         });
       }
     } catch (err: any) {
@@ -82,7 +75,7 @@ const ValidationModal: React.FC<ValidationModalProps> = ({
               Voter Verification
             </h2>
             <p className="text-[#BDD0BE] mt-2">
-              Enter your name to open the official ballot.
+              Use your Mechanical Engineering class-list details to open the official ballot.
             </p>
           </div>
 
@@ -90,46 +83,48 @@ const ValidationModal: React.FC<ValidationModalProps> = ({
             <div className="space-y-4">
               <div>
                 <label
-                  htmlFor="fullName"
+                  htmlFor="matricNumber"
                   className="block text-sm font-medium text-[#BDD0BE] mb-1.5"
                 >
-                  Full Name
+                  Matric Number
                 </label>
                 <input
                   type="text"
-                  id="fullName"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
+                  id="matricNumber"
+                  value={matricNumber}
+                  onChange={(e) => setMatricNumber(e.target.value.replace(/[^0-9\s/-]/g, ""))}
                   required
+                  inputMode="numeric"
+                  autoComplete="off"
+                  maxLength={12}
                   className="w-full bg-black/30 border border-[#E8650A]/35 rounded-md px-4 py-3 text-white placeholder:text-[#7A9A7C] focus:outline-none focus:ring-2 focus:ring-[#E8650A]/35 focus:border-[#E8650A]"
-                  placeholder="Enter your full name"
+                  placeholder="e.g. 210404001"
                 />
               </div>
-              {organization.voterRequiresDepartment && (
               <div>
                 <label
-                  htmlFor="department"
+                  htmlFor="surname"
                   className="block text-sm font-medium text-[#BDD0BE] mb-1.5"
                 >
-                  Department
+                  Surname
                 </label>
-                <select
-                  id="department"
-                  value={department}
-                  onChange={(e) => setDepartment(e.target.value)}
+                <input
+                  type="text"
+                  id="surname"
+                  value={surname}
+                  onChange={(e) => setSurname(e.target.value)}
                   required
+                  autoComplete="family-name"
+                  maxLength={80}
                   className="w-full bg-black/30 border border-[#E8650A]/35 rounded-md px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-[#E8650A]/35 focus:border-[#E8650A]"
-                >
-                  <option value="" disabled>Select your group</option>
-                  {departments.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.title}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Enter your surname"
+                />
               </div>
-              )}
             </div>
+
+            <p className="mt-4 text-xs leading-5 text-[#7A9A7C]">
+              Your details are checked privately against the official class list and are not displayed publicly.
+            </p>
 
             {error && (
               <p className="text-red-400 text-center text-sm mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-md">

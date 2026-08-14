@@ -1,5 +1,5 @@
 // routes/middleware.js — Shared middleware: rate limiters, CSRF, auth, election cache
-const rateLimit = require('express-rate-limit')
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit')
 const jwt = require('jsonwebtoken')
 const crypto = require('crypto')
 const { query } = require('../db')
@@ -30,6 +30,18 @@ const voteLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     message: { message: 'Too many vote attempts. Please try again later.' }
+})
+
+const voterValidationLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 6,
+    keyGenerator: req => {
+        const matricNumber = String(req.body?.matricNumber || '').replace(/\D/g, '').slice(0, 9)
+        return `${ipKeyGenerator(req.ip)}:${matricNumber || 'missing'}`
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: 'Too many verification attempts. Please wait and try again.' }
 })
 
 const adminLoginLimiter = rateLimit({
@@ -96,7 +108,10 @@ function requireAdmin(req, res, next) {
     const authHeader = req.headers.authorization
     if (authHeader && authHeader.startsWith('Bearer ')) {
         try {
-            jwt.verify(authHeader.slice(7), getJwtSecret())
+            const payload = jwt.verify(authHeader.slice(7), getJwtSecret())
+            if (payload.role !== 'admin') {
+                return res.status(401).json({ message: 'Unauthorized: Invalid credentials.' })
+            }
             return next()
         } catch {
             return res.status(401).json({ message: 'Session expired. Please log in again.' })
@@ -107,6 +122,43 @@ function requireAdmin(req, res, next) {
         return next()
     }
     return res.status(401).json({ message: 'Unauthorized: Invalid credentials.' })
+}
+
+function issueVoterToken(voter) {
+    return jwt.sign(
+        {
+            role: 'voter',
+            organizationId: voter.organizationId,
+            electionId: voter.electionId,
+        },
+        getJwtSecret(),
+        { subject: voter.id, expiresIn: '12h' }
+    )
+}
+
+function requireVoter(req, res, next) {
+    const token = req.get('X-Voter-Token')
+    if (!token) {
+        return res.status(401).json({ message: 'Please verify your voter details again.' })
+    }
+    try {
+        const payload = jwt.verify(token, getJwtSecret())
+        if (
+            payload.role !== 'voter' ||
+            payload.organizationId !== getOrgId() ||
+            typeof payload.sub !== 'string' ||
+            typeof payload.electionId !== 'string'
+        ) {
+            throw new Error('Invalid voter session')
+        }
+        req.voter = {
+            id: payload.sub,
+            electionId: payload.electionId,
+        }
+        return next()
+    } catch {
+        return res.status(401).json({ message: 'Your voter session has expired. Please verify again.' })
+    }
 }
 
 // =================================================================
@@ -161,12 +213,15 @@ module.exports = {
     getOrgId,
     globalLimiter,
     voteLimiter,
+    voterValidationLimiter,
     adminLimiter,
     adminLoginLimiter,
     nominateLimiter,
     csrfProtection,
     issueCsrfToken,
     requireAdmin,
+    requireVoter,
+    issueVoterToken,
     getElectionStatus,
     getPortalMode,
     invalidateElectionCache,

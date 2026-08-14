@@ -13,13 +13,16 @@ const AdminPage = lazy(() => import("./pages/AdminPage"));
 export interface VoterInfo {
   fullName: string;
   department: string;
+  voterToken: string;
 }
 
 function App() {
   const [voter, setVoter] = useState<VoterInfo | null>(() => {
     try {
       const raw = sessionStorage.getItem("voter");
-      return raw ? (JSON.parse(raw) as VoterInfo) : null;
+      if (!raw) return null;
+      const saved = JSON.parse(raw) as VoterInfo;
+      return saved.voterToken ? saved : null;
     } catch {
       return null;
     }
@@ -95,7 +98,7 @@ function App() {
         </Route>
 
         <Route path="/vote">
-          {voter ? <VotingWelcomePage voter={voter} /> : <Redirect to="/" />}
+          {voter ? <VotingWelcomePage voter={voter} onSignOut={() => setVoter(null)} /> : <Redirect to="/" />}
         </Route>
 
         <Route path="/nominate" component={NominationPage} />
