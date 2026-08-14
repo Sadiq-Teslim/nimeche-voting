@@ -2,7 +2,7 @@
 import { Suspense, lazy, useState, useEffect } from "react";
 import { Switch, Route, Redirect } from "wouter";
 import LandingPage from "./pages/LandingPage";
-import VotingPage from "./pages/VotingPage";
+import VotingPage, { type BallotSelections } from "./pages/VotingPage";
 import VotingWelcomePage from "./pages/VotingWelcomePage";
 import NominationPage from "./pages/NominationPage";
 import { organization } from "./config/organization";
@@ -25,6 +25,16 @@ function App() {
       return saved.voterToken ? saved : null;
     } catch {
       return null;
+    }
+  });
+  const [ballotSelections, setBallotSelections] = useState<BallotSelections>(() => {
+    try {
+      const raw = sessionStorage.getItem("ballotDraft");
+      if (!raw) return {};
+      const saved = JSON.parse(raw) as { voterToken?: string; selections?: BallotSelections };
+      return voter?.voterToken === saved.voterToken && saved.selections ? saved.selections : {};
+    } catch {
+      return {};
     }
   });
 
@@ -86,19 +96,53 @@ function App() {
     }
   }, [voter]);
 
+  useEffect(() => {
+    if (voter) {
+      sessionStorage.setItem("ballotDraft", JSON.stringify({
+        voterToken: voter.voterToken,
+        selections: ballotSelections,
+      }));
+    } else {
+      sessionStorage.removeItem("ballotDraft");
+    }
+  }, [ballotSelections, voter]);
+
+  const handleVerifiedVoter = (nextVoter: VoterInfo) => {
+    setBallotSelections({});
+    setVoter(nextVoter);
+  };
+
+  const handleSignOut = () => {
+    setBallotSelections({});
+    setVoter(null);
+  };
+
   return (
     <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center">
       <Switch>
         <Route path="/">
-          <LandingPage setVoter={setVoter} />
+          <LandingPage setVoter={handleVerifiedVoter} />
         </Route>
 
         <Route path="/vote/:groupKey">
-          {(params) => voter ? <VotingPage voter={voter} groupKey={params.groupKey} /> : <Redirect to="/" />}
+          {(params) => voter ? (
+            <VotingPage
+              voter={voter}
+              groupKey={params.groupKey}
+              selections={ballotSelections}
+              setSelections={setBallotSelections}
+            />
+          ) : <Redirect to="/" />}
         </Route>
 
         <Route path="/vote">
-          {voter ? <VotingWelcomePage voter={voter} onSignOut={() => setVoter(null)} /> : <Redirect to="/" />}
+          {voter ? (
+            <VotingWelcomePage
+              voter={voter}
+              selections={ballotSelections}
+              onSignOut={handleSignOut}
+            />
+          ) : <Redirect to="/" />}
         </Route>
 
         <Route path="/nominate" component={NominationPage} />

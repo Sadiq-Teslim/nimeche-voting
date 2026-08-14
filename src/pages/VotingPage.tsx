@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { Link, Redirect } from "wouter";
 import { ArrowLeft, Check, CheckCircle2, ImageIcon, Loader2, Search, Send, ShieldCheck, Trophy } from "lucide-react";
 import ImageZoomModal from "../components/ImageZoomModal";
@@ -29,7 +30,14 @@ interface BallotGroup {
   categories: Category[];
 }
 
-type Selections = Record<string, string>;
+export type BallotSelections = Record<string, string>;
+
+interface VotingPageProps {
+  voter: VoterInfo;
+  groupKey: string;
+  selections: BallotSelections;
+  setSelections: Dispatch<SetStateAction<BallotSelections>>;
+}
 
 const brand = {
   background: "#0A0D0A",
@@ -122,10 +130,9 @@ const CandidateCard = ({ nominee, selected, disabled, onSelect, onImageClick }: 
   );
 };
 
-const VotingPage: React.FC<{ voter: VoterInfo; groupKey: string }> = ({ voter, groupKey }) => {
+const VotingPage: React.FC<VotingPageProps> = ({ voter, groupKey, selections, setSelections }) => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [votedCategoryIds, setVotedCategoryIds] = useState<string[]>([]);
-  const [selections, setSelections] = useState<Selections>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -151,7 +158,13 @@ const VotingPage: React.FC<{ voter: VoterInfo; groupKey: string }> = ({ voter, g
         const votedResponse = await retryWithBackoff(() => api.get("/voted-categories", { headers: { "X-Voter-Token": voter.voterToken } }));
         const departmentCategories = (ballotResponse.data.departments || []).flatMap((department: any) => department.subcategories || []);
         setCategories([...(ballotResponse.data.categories || []), ...departmentCategories]);
-        setVotedCategoryIds(votedResponse.data.votedCategoryIds || []);
+        const votedIds = votedResponse.data.votedCategoryIds || [];
+        setVotedCategoryIds(votedIds);
+        if (votedIds.length > 0) {
+          setSelections((current) => Object.fromEntries(
+            Object.entries(current).filter(([categoryId]) => !votedIds.includes(categoryId)),
+          ));
+        }
       } catch {
         setError("Could not load the NIMechE ballot. Please refresh and try again.");
       } finally {
@@ -159,7 +172,7 @@ const VotingPage: React.FC<{ voter: VoterInfo; groupKey: string }> = ({ voter, g
       }
     };
     fetchBallot();
-  }, [groupKey, voter.voterToken]);
+  }, [groupKey, setSelections, voter.voterToken]);
 
   const ballotGroups = useMemo<BallotGroup[]>(() => {
     const groupLabels = organization.categoryGroups || {};
@@ -204,6 +217,7 @@ const VotingPage: React.FC<{ voter: VoterInfo; groupKey: string }> = ({ voter, g
   const availableCategoryCount = visibleCategories.filter((category) => category.nominees.length > 0).length;
   const completedCount = visibleCategories.filter((category) => votedCategoryIds.includes(category.id)).length;
   const selectionCount = Object.keys(selections).length;
+  const visibleSelectionCount = visibleCategories.filter((category) => selections[category.id]).length;
 
   const handleSelectNominee = (categoryId: string, candidateId: string) => {
     if (votedCategoryIds.includes(categoryId)) return;
@@ -229,7 +243,7 @@ const VotingPage: React.FC<{ voter: VoterInfo; groupKey: string }> = ({ voter, g
       const skippedCount = response.data.skipped?.length || 0;
       if (recordedCount === 0 && skippedCount > 0) setSuccessMessage("You have already voted in those awards.");
       else if (skippedCount > 0) setSuccessMessage(`${recordedCount} vote(s) recorded. ${skippedCount} previously completed award(s) were skipped.`);
-      else setSuccessMessage(`${recordedCount} vote(s) recorded successfully.`);
+      else setSuccessMessage(`${recordedCount} vote(s) across your ballot were recorded successfully.`);
       setIsSuccessOpen(true);
     } catch (submitError: any) {
       setSubmissionError(submitError.response?.data?.message || "Votes could not be submitted. Please try again.");
@@ -296,11 +310,12 @@ const VotingPage: React.FC<{ voter: VoterInfo; groupKey: string }> = ({ voter, g
           <p className="mt-6 text-xs font-bold uppercase tracking-[0.18em]" style={{ color: brand.orange }}>Official Ballot</p>
           <h1 className="mt-3 text-3xl font-bold sm:text-5xl" style={{ color: brand.text }}>{currentGroupLabel}</h1>
           <p className="mt-3 max-w-2xl leading-7" style={{ color: brand.secondary }}>
-            Welcome, <span className="font-bold" style={{ color: brand.text }}>{voter.fullName}</span>. Select one nominee for each award you want to complete, then submit this ballot.
+            Welcome, <span className="font-bold" style={{ color: brand.text }}>{voter.fullName}</span>. Your selections stay with you while you move between both award collections. Submit once when your full ballot is ready.
           </p>
           <div className="mt-6 flex flex-wrap gap-3 text-sm">
             <span className="rounded-md border px-3 py-2" style={{ borderColor: brand.border, color: brand.secondary }}>{availableCategoryCount} awards with nominees</span>
             <span className="rounded-md border px-3 py-2" style={{ borderColor: brand.border, color: brand.secondary }}>{completedCount} completed by you</span>
+            <span className="rounded-md border px-3 py-2" style={{ borderColor: brand.border, color: brand.gold }}>{visibleSelectionCount} selected here · {selectionCount} total</span>
           </div>
         </section>
 
@@ -351,13 +366,13 @@ const VotingPage: React.FC<{ voter: VoterInfo; groupKey: string }> = ({ voter, g
       <footer className="fixed bottom-0 left-0 right-0 z-30 border-t bg-[#0A0D0A]/95 p-3 backdrop-blur-md sm:p-4" style={{ borderColor: brand.border }}>
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-sm font-bold" style={{ color: brand.text }}>Your Ballot</p>
-            <p className="truncate text-xs sm:text-sm" style={{ color: brand.gold }}>{selectionCount} vote(s) selected</p>
+            <p className="text-sm font-bold" style={{ color: brand.text }}>Your Carried Ballot</p>
+            <p className="truncate text-xs sm:text-sm" style={{ color: brand.gold }}>{selectionCount} selection(s) across both award collections</p>
             {submissionError && <p className="mt-1 max-w-xl text-xs text-red-300">{submissionError}</p>}
           </div>
           <button type="button" onClick={handleSubmitVotes} disabled={selectionCount === 0 || isSubmitting} className="flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-md px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-45 sm:px-7 sm:text-base" style={{ backgroundColor: selectionCount > 0 ? brand.orange : "#4A5148" }}>
             {isSubmitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
-            <span className="hidden sm:inline">{isSubmitting ? "Submitting..." : `Submit ${selectionCount} Vote(s)`}</span>
+            <span className="hidden sm:inline">{isSubmitting ? "Submitting..." : `Submit Full Ballot (${selectionCount})`}</span>
             <span className="sm:hidden">{isSubmitting ? "Sending" : `Submit ${selectionCount}`}</span>
           </button>
         </div>

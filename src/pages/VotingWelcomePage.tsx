@@ -12,7 +12,7 @@ import {
 import { api, assetUrl } from "../api/client";
 import { organization } from "../config/organization";
 import type { VoterInfo } from "../App";
-import type { Category } from "./VotingPage";
+import type { BallotSelections, Category } from "./VotingPage";
 import { retryWithBackoff } from "../utils/retry";
 
 interface VotingGroup {
@@ -44,7 +44,7 @@ const groupDetails: Record<string, { description: string; icon: typeof Graduatio
   },
 };
 
-const VotingWelcomePage: React.FC<{ voter: VoterInfo; onSignOut: () => void }> = ({ voter, onSignOut }) => {
+const VotingWelcomePage: React.FC<{ voter: VoterInfo; selections: BallotSelections; onSignOut: () => void }> = ({ voter, selections, onSignOut }) => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [votedCategoryIds, setVotedCategoryIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -83,6 +83,7 @@ const VotingWelcomePage: React.FC<{ voter: VoterInfo; onSignOut: () => void }> =
   );
 
   if (!voter.fullName || !voter.voterToken) return <Redirect to="/" />;
+  const draftSelectionCount = Object.keys(selections).length;
 
   const backgroundImage = organization.nominationBackground
     ? `url("${assetUrl(organization.nominationBackground)}")`
@@ -115,8 +116,13 @@ const VotingWelcomePage: React.FC<{ voter: VoterInfo; onSignOut: () => void }> =
           </div>
           <h1 className="mt-5 text-4xl font-bold sm:text-6xl" style={{ color: brand.text }}>Where would you like to vote?</h1>
           <p className="mt-4 max-w-2xl text-base leading-7 sm:text-lg" style={{ color: brand.secondary }}>
-            Welcome, <strong style={{ color: brand.text }}>{voter.fullName}</strong>. Choose an award collection below. You can return here at any time to continue with the other one.
+            Welcome, <strong style={{ color: brand.text }}>{voter.fullName}</strong>. Choose an award collection below. Your selections are carried between both collections until you submit the full ballot.
           </p>
+          {draftSelectionCount > 0 && (
+            <div className="mt-5 inline-flex items-center gap-2 rounded-md border px-4 py-3 text-sm font-bold" style={{ borderColor: brand.border, backgroundColor: brand.panel, color: brand.gold }}>
+              <CheckCircle2 size={18} /> {draftSelectionCount} selection{draftSelectionCount === 1 ? "" : "s"} currently carried
+            </div>
+          )}
         </section>
 
         {isLoading ? (
@@ -135,6 +141,7 @@ const VotingWelcomePage: React.FC<{ voter: VoterInfo; onSignOut: () => void }> =
               const Icon = detail.icon;
               const available = group.categories.filter((category) => category.nominees.length > 0).length;
               const completed = group.categories.filter((category) => votedCategoryIds.includes(category.id)).length;
+              const drafted = group.categories.filter((category) => selections[category.id]).length;
               const isComplete = available > 0 && completed >= available;
 
               return (
@@ -148,19 +155,23 @@ const VotingWelcomePage: React.FC<{ voter: VoterInfo; onSignOut: () => void }> =
                     <span className="flex h-14 w-14 items-center justify-center rounded-md border" style={{ borderColor: brand.border, color: index === 0 ? brand.orange : brand.gold, backgroundColor: "rgba(0,0,0,0.25)" }}>
                       <Icon size={28} />
                     </span>
-                    {isComplete && (
+                    {isComplete ? (
                       <span className="inline-flex items-center gap-1.5 rounded-md bg-[#2E7D32]/20 px-3 py-1.5 text-xs font-bold text-green-300">
                         <CheckCircle2 size={15} /> Complete
                       </span>
-                    )}
+                    ) : drafted > 0 ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-md bg-[#E8650A]/15 px-3 py-1.5 text-xs font-bold" style={{ color: brand.gold }}>
+                        {drafted} carried
+                      </span>
+                    ) : null}
                   </div>
                   <p className="mt-8 text-xs font-bold uppercase tracking-[0.16em]" style={{ color: brand.orange }}>{group.categories.length} awards</p>
                   <h2 className="mt-2 text-2xl font-bold sm:text-3xl" style={{ color: brand.text }}>{group.label}</h2>
                   <p className="mt-3 flex-1 leading-6" style={{ color: brand.secondary }}>{detail.description}</p>
                   <div className="mt-7 flex items-center justify-between border-t pt-5" style={{ borderColor: brand.border }}>
-                    <span className="text-sm" style={{ color: brand.muted }}>{completed} of {available} completed</span>
+                    <span className="text-sm" style={{ color: brand.muted }}>{completed} completed · {drafted} selected</span>
                     <span className="inline-flex items-center gap-2 text-sm font-bold" style={{ color: brand.gold }}>
-                      {isComplete ? "Review ballot" : "Enter ballot"}
+                      {isComplete ? "Review ballot" : drafted > 0 ? "Continue ballot" : "Enter ballot"}
                       <ArrowRight className="transition-transform group-hover:translate-x-1" size={18} />
                     </span>
                   </div>
