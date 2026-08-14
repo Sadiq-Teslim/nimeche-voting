@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { Link, Redirect } from "wouter";
-import { ArrowLeft, Check, CheckCircle2, ImageIcon, Loader2, Search, Send, ShieldCheck, Trophy } from "lucide-react";
+import { ArrowLeft, Check, CheckCircle2, ChevronDown, ImageIcon, Loader2, Search, Send, ShieldCheck, Trophy } from "lucide-react";
 import ImageZoomModal from "../components/ImageZoomModal";
 import { api, assetUrl } from "../api/client";
 import { organization } from "../config/organization";
@@ -141,6 +141,7 @@ const VotingPage: React.FC<VotingPageProps> = ({ voter, groupKey, selections, se
   const [isSuccessOpen, setIsSuccessOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [zoomedNominee, setZoomedNominee] = useState<Nominee | null>(null);
+  const [expandedCategoryId, setExpandedCategoryId] = useState<string | null>(null);
   const fingerprintRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -333,23 +334,40 @@ const VotingPage: React.FC<VotingPageProps> = ({ voter, groupKey, selections, se
                 <div className="space-y-8">
                   {group.categories.map((category) => {
                     const voted = votedCategoryIds.includes(category.id);
+                    const expanded = expandedCategoryId === category.id;
+                    const selected = Boolean(selections[category.id]);
                     return (
                       <article key={category.id} className="rounded-lg border p-4 sm:p-6" style={{ backgroundColor: "rgba(8,14,7,0.72)", borderColor: brand.border }}>
-                        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-                          <div>
+                        <div className={`${expanded ? "mb-5" : "mb-0"} flex flex-wrap items-start justify-between gap-3 sm:mb-5`}>
+                          <div className="min-w-0 flex-1">
                             <h3 className="text-xl font-bold" style={{ color: brand.text }}>{category.title}</h3>
-                            <p className="mt-1 text-sm" style={{ color: brand.muted }}>{voted ? "You have completed this award" : `${category.nominees.length} approved nominee${category.nominees.length === 1 ? "" : "s"}`}</p>
+                            <p className="mt-1 text-sm" style={{ color: selected ? brand.gold : brand.muted }}>
+                              {voted ? "You have completed this award" : selected ? "1 selection carried in your ballot" : `${category.nominees.length} approved nominee${category.nominees.length === 1 ? "" : "s"}`}
+                            </p>
                           </div>
-                          {voted && <span className="inline-flex items-center gap-1.5 rounded-md bg-[#2E7D32]/20 px-3 py-1.5 text-xs font-bold text-green-300"><Check size={15} /> Completed</span>}
+                          <div className="flex shrink-0 items-center gap-2">
+                            {voted && <span className="hidden items-center gap-1.5 rounded-md bg-[#2E7D32]/20 px-3 py-1.5 text-xs font-bold text-green-300 min-[420px]:inline-flex"><Check size={15} /> Completed</span>}
+                            <button
+                              type="button"
+                              onClick={() => setExpandedCategoryId((current) => current === category.id ? null : category.id)}
+                              className="flex h-11 w-11 items-center justify-center rounded-md border transition-colors hover:bg-white/5 sm:hidden"
+                              style={{ borderColor: brand.border, color: expanded ? brand.gold : brand.secondary }}
+                              aria-expanded={expanded}
+                              aria-controls={`nominees-${category.id}`}
+                              aria-label={`${expanded ? "Collapse" : "Expand"} ${category.title}`}
+                            >
+                              <ChevronDown className={`transition-transform ${expanded ? "rotate-180" : ""}`} size={21} />
+                            </button>
+                          </div>
                         </div>
                         {category.nominees.length > 0 ? (
-                          <div className="grid grid-cols-1 gap-4 min-[480px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                          <div id={`nominees-${category.id}`} className={`${expanded ? "grid" : "hidden"} grid-cols-1 gap-4 min-[480px]:grid-cols-2 sm:grid lg:grid-cols-3 xl:grid-cols-4`}>
                             {category.nominees.map((nominee) => (
                               <CandidateCard key={nominee.id} nominee={nominee} selected={selections[category.id] === nominee.id} disabled={voted} onSelect={() => handleSelectNominee(category.id, nominee.id)} onImageClick={() => nominee.image && setZoomedNominee(nominee)} />
                             ))}
                           </div>
                         ) : (
-                          <div className="rounded-md border border-dashed px-4 py-8 text-center" style={{ borderColor: brand.border, color: brand.muted }}>No approved nominees yet.</div>
+                          <div id={`nominees-${category.id}`} className={`${expanded ? "block" : "hidden"} rounded-md border border-dashed px-4 py-8 text-center sm:block`} style={{ borderColor: brand.border, color: brand.muted }}>No approved nominees yet.</div>
                         )}
                       </article>
                     );
