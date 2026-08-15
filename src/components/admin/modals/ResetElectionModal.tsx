@@ -57,8 +57,9 @@ const ResetElectionModal = ({
               Are you absolutely sure?
             </h2>
             <p className="text-slate-300 my-4">
-              This will permanently delete all votes and voter records. This
-              action cannot be undone.
+              This will permanently delete every recorded vote and reset the
+              displayed results to zero. Eligible voters, nominees, categories,
+              and nominations will remain unchanged. This action cannot be undone.
             </p>
             <div className="flex justify-center gap-4 mt-8">
               <button

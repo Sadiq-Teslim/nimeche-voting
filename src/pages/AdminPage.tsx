@@ -129,7 +129,7 @@ const AdminPage = () => {
 
   const handleResetElection = async () => {
     const response = await api.post("/reset-election", {}, authHeaders(adminToken));
-    handleRefresh();
+    await handleRefresh();
     return response.data;
   };
 
