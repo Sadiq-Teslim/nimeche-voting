@@ -1037,6 +1037,10 @@ const AdminPage = () => {
               await api.post("/reject-nomination", { nominationId }, authHeaders(adminToken));
               await fetchNominationPage(adminToken, nominationPage, nominationSearch);
             }}
+            onUpdateNomineeImage={async (nominationId, imageUrl) => {
+              await api.post("/update-nominee-image", { nominationId, imageUrl }, authHeaders(adminToken));
+              await fetchNominationPage(adminToken, nominationPage, nominationSearch);
+            }}
           />
         )}
         {activeTab === "settings" && (

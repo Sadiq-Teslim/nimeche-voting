@@ -8,11 +8,13 @@ import {
   ChevronUp,
   Link as LinkIcon,
   Loader2,
+  Pencil,
   Search,
   Users,
   XCircle,
 } from "lucide-react";
-import type { NominationCategory } from "../../../types/admin";
+import type { Nomination, NominationCategory } from "../../../types/admin";
+import EditNomineeImageModal from "../modals/EditNomineeImageModal";
 
 interface NominationsTabProps {
   categoryGroups: NominationCategory[];
@@ -27,6 +29,7 @@ interface NominationsTabProps {
   onPageChange: (page: number) => void;
   onApproveNomination: (id: string) => Promise<void>;
   onRejectNomination: (id: string) => Promise<void>;
+  onUpdateNomineeImage: (id: string, imageUrl: string) => Promise<void>;
 }
 
 function mutationMessage(error: unknown, fallback: string) {
@@ -50,10 +53,12 @@ const NominationsTab: React.FC<NominationsTabProps> = ({
   onPageChange,
   onApproveNomination,
   onRejectNomination,
+  onUpdateNomineeImage,
 }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [openCategories, setOpenCategories] = useState<Set<string>>(new Set());
+  const [editingNomination, setEditingNomination] = useState<Nomination | null>(null);
 
   const toggleCategory = (category: string) => {
     setOpenCategories((current) => {
@@ -177,6 +182,9 @@ const NominationsTab: React.FC<NominationsTabProps> = ({
                           </div>
 
                           <div className="flex w-full flex-wrap items-center justify-end gap-2 lg:w-auto">
+                            <button type="button" onClick={() => setEditingNomination(nomination)} disabled={!!processingId} className="flex min-h-10 items-center gap-1.5 rounded-md border border-amber-500/40 px-3 py-2 text-xs font-bold text-amber-300 hover:bg-amber-500/10 disabled:opacity-50">
+                              <Pencil size={14} /> {nomination.imageUrl ? "Edit photo" : "Add photo"}
+                            </button>
                             {nomination.imageUrl && (
                               <button type="button" onClick={() => handleCopyUrl(nomination.imageUrl!, nomination.id)} disabled={!!processingId} className="flex min-h-10 items-center gap-1.5 rounded-md bg-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-600 disabled:opacity-50">
                                 {copiedId === nomination.id ? <><Check size={14} /> Copied</> : <><LinkIcon size={14} /> Image URL</>}
@@ -210,6 +218,12 @@ const NominationsTab: React.FC<NominationsTabProps> = ({
           </div>
         </nav>
       )}
+
+      <EditNomineeImageModal
+        nomination={editingNomination}
+        onClose={() => setEditingNomination(null)}
+        onSave={onUpdateNomineeImage}
+      />
     </section>
   );
 };

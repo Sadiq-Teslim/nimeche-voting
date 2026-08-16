@@ -95,6 +95,17 @@ router.post('/pending-nominations', async (req, res) => {
                     order by sort_order, title, id
                     offset $4 limit $5
                 ),
+                person_images as (
+                    select
+                        n.election_id,
+                        lower(regexp_replace(trim(n.full_name), '\\s+', ' ', 'g')) as person_key,
+                        (array_agg(nullif(trim(n.image_url), '') order by n.submitted_at desc)
+                            filter (where nullif(trim(n.image_url), '') is not null))[1] as image_url
+                    from nominations n
+                    where n.organization_id = $1
+                    group by n.election_id,
+                             lower(regexp_replace(trim(n.full_name), '\\s+', ' ', 'g'))
+                ),
                 grouped_nominees as (
                     select
                         (array_agg(n.id order by (n.status = 'pending') desc, n.submitted_at desc))[1] as id,
@@ -107,7 +118,9 @@ router.post('/pending-nominations', async (req, res) => {
                         count(*)::int as "nominationCount",
                         count(*) filter (where n.status = 'approved')::int as "approvedCount",
                         count(*) filter (where n.status = 'pending')::int as "pendingCount",
-                        count(*) filter (where n.status = 'rejected')::int as "rejectedCount"
+                        count(*) filter (where n.status = 'rejected')::int as "rejectedCount",
+                        n.election_id as election,
+                        lower(regexp_replace(trim(n.full_name), '\\s+', ' ', 'g')) as person_key
                     from nominations n
                     join category_page cp on cp.id = n.position_id
                     where n.organization_id = $1
@@ -128,7 +141,7 @@ router.post('/pending-nominations', async (req, res) => {
                     gn."nominationIds",
                     gn."fullName",
                     gn."popularName",
-                    gn."imageUrl",
+                    coalesce(gn."imageUrl", pi.image_url) as "imageUrl",
                     gn."submittedAt",
                     gn."nominationCount",
                     gn."approvedCount",
@@ -136,6 +149,7 @@ router.post('/pending-nominations', async (req, res) => {
                     gn."rejectedCount"
                 from category_page cp
                 left join grouped_nominees gn on gn.category = cp.id
+                left join person_images pi on pi.election_id = gn.election and pi.person_key = gn.person_key
                 order by cp.sort_order, cp.title, cp.id, gn."fullName"`,
                 [getOrgId(), search, searchPattern, skip, limit]
             ),
@@ -222,6 +236,75 @@ router.post('/pending-nominations', async (req, res) => {
     } catch (error) {
         console.error('Error fetching pending nominations:', error)
         res.status(500).json({ message: 'Error fetching pending nominations.' })
+    }
+})
+
+// --- Add, replace, or remove a nominee photo everywhere they appear ---
+router.post('/update-nominee-image', async (req, res) => {
+    const { nominationId } = req.body
+    const rawImageUrl = typeof req.body.imageUrl === 'string' ? req.body.imageUrl.trim() : ''
+
+    if (!nominationId) return res.status(400).json({ message: 'Nomination ID is required.' })
+    if (rawImageUrl.length > 2048) return res.status(400).json({ message: 'Image URL is too long.' })
+
+    if (rawImageUrl) {
+        try {
+            const parsed = new URL(rawImageUrl)
+            if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Unsupported protocol')
+        } catch {
+            return res.status(400).json({ message: 'Enter a valid http or https image URL.' })
+        }
+    }
+
+    try {
+        const result = await transaction(async client => {
+            const nomination = await client.query(
+                `select election_id, full_name
+                 from nominations
+                 where organization_id = $1 and id = $2
+                 for update`,
+                [getOrgId(), nominationId]
+            )
+            if (!nomination.rows[0]) {
+                const error = new Error('Nomination not found.')
+                error.statusCode = 404
+                throw error
+            }
+
+            const { election_id: electionId, full_name: fullName } = nomination.rows[0]
+            const imageUrl = rawImageUrl || null
+            const nominations = await client.query(
+                `update nominations
+                 set image_url = $4
+                 where organization_id = $1
+                   and election_id = $2
+                   and lower(regexp_replace(trim(full_name), '\\s+', ' ', 'g')) =
+                       lower(regexp_replace(trim($3), '\\s+', ' ', 'g'))`,
+                [getOrgId(), electionId, fullName, imageUrl]
+            )
+            const candidates = await client.query(
+                `update candidates
+                 set image_url = $4
+                 where organization_id = $1
+                   and election_id = $2
+                   and lower(regexp_replace(regexp_replace(trim(name), '\\s*\\([^)]*\\)\\s*$', ''), '\\s+', ' ', 'g')) =
+                       lower(regexp_replace(trim($3), '\\s+', ' ', 'g'))`,
+                [getOrgId(), electionId, fullName, imageUrl]
+            )
+
+            return { nominationsUpdated: nominations.rowCount, candidatesUpdated: candidates.rowCount }
+        })
+
+        console.log(`[AUDIT] Updated nominee photo for nomination ${nominationId}`)
+        res.json({
+            success: true,
+            imageUrl: rawImageUrl || null,
+            ...result,
+            message: rawImageUrl ? 'Nominee photo updated everywhere.' : 'Nominee photo removed everywhere.',
+        })
+    } catch (error) {
+        console.error('Error updating nominee image:', error)
+        res.status(error.statusCode || 500).json({ message: error.message || 'Error updating nominee photo.' })
     }
 })
 
@@ -346,6 +429,19 @@ router.post('/approve-nomination', async (req, res) => {
             )
 
             const preferred = duplicateRes.rows.find(row => row.image_url) || duplicateRes.rows[0]
+            const personImageRes = await client.query(
+                `select image_url
+                 from nominations
+                 where organization_id = $1
+                   and election_id = $2
+                   and lower(regexp_replace(trim(full_name), '\\s+', ' ', 'g')) =
+                       lower(regexp_replace(trim($3), '\\s+', ' ', 'g'))
+                   and nullif(trim(image_url), '') is not null
+                 order by submitted_at desc
+                 limit 1`,
+                [getOrgId(), nom.election_id, nom.full_name]
+            )
+            const preferredImageUrl = preferred.image_url || personImageRes.rows[0]?.image_url || null
             const candidateName = preferred.full_name.trim()
             const existingCandidate = await client.query(
                 `select id
@@ -366,7 +462,7 @@ router.post('/approve-nomination', async (req, res) => {
                          description = coalesce($3, description),
                          status = 'approved'
                      where id = $1`,
-                    [existingCandidate.rows[0].id, preferred.image_url || null, description || preferred.popular_name || null]
+                    [existingCandidate.rows[0].id, preferredImageUrl, description || preferred.popular_name || null]
                 )
             } else {
                 await client.query(
@@ -382,7 +478,7 @@ router.post('/approve-nomination', async (req, res) => {
                     nom.position_id,
                     candidateName,
                     description || preferred.popular_name || null,
-                    preferred.image_url || null
+                    preferredImageUrl
                 ]
                 )
             }
