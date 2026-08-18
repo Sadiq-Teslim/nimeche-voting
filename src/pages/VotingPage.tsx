@@ -68,7 +68,9 @@ async function postVotesWithFreshCsrf(payload: unknown, voterToken: string) {
       api.post("/submit-votes", payload, { headers: { "X-CSRF-Token": csrfToken, "X-Voter-Token": voterToken } }),
     );
   } catch (error: any) {
-    if (error.response?.status !== 403) throw error;
+    const isExpiredRequestToken = error.response?.status === 403
+      && error.response?.data?.message === "Invalid security token. Please refresh and try again.";
+    if (!isExpiredRequestToken) throw error;
     cachedCsrfToken = null;
     const freshToken = await getCsrfToken();
     return retryWithBackoff(() =>

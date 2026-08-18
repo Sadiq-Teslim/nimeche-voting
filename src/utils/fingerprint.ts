@@ -1,7 +1,8 @@
 /**
  * Browser fingerprinting utility.
- * Generates a stable hash from multiple browser/device signals.
- * No 3rd-party dependencies — pure browser APIs.
+ * Generates a persistent random identifier for this browser profile.
+ * Hardware fingerprinting is used only as a fallback when secure randomness
+ * is unavailable, avoiding collisions between similar phones.
  */
 
 async function getCanvasFingerprint(): Promise<string> {
@@ -18,9 +19,9 @@ async function getCanvasFingerprint(): Promise<string> {
     ctx.fillStyle = "#f60";
     ctx.fillRect(125, 1, 62, 20);
     ctx.fillStyle = "#069";
-    ctx.fillText("ULES fingerprint", 2, 15);
+    ctx.fillText("NIMechE browser ID", 2, 15);
     ctx.fillStyle = "rgba(102, 204, 0, 0.7)";
-    ctx.fillText("ULES fingerprint", 4, 17);
+    ctx.fillText("NIMechE browser ID", 4, 17);
 
     return canvas.toDataURL();
   } catch {
@@ -92,19 +93,24 @@ export async function generateFingerprint(): Promise<string> {
   const storageKey = "voting_device_fingerprint_v1";
   try {
     const cached = window.localStorage.getItem(storageKey);
-    if (cached && /^[a-f0-9]{16}$/i.test(cached)) return cached;
+    if (cached && /^[a-f0-9]{16,64}$/i.test(cached)) return cached;
   } catch {
     // Storage can be unavailable in private or restricted browser contexts.
   }
 
-  const [canvasData, webglData, deviceData] = await Promise.all([
-    getCanvasFingerprint(),
-    Promise.resolve(getWebGLFingerprint()),
-    Promise.resolve(getDeviceSignals()),
-  ]);
-
-  const raw = `${canvasData}||${webglData}||${deviceData}`;
-  const fingerprint = hashString(raw);
+  let fingerprint = "";
+  try {
+    const bytes = new Uint8Array(16);
+    window.crypto.getRandomValues(bytes);
+    fingerprint = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  } catch {
+    const [canvasData, webglData, deviceData] = await Promise.all([
+      getCanvasFingerprint(),
+      Promise.resolve(getWebGLFingerprint()),
+      Promise.resolve(getDeviceSignals()),
+    ]);
+    fingerprint = hashString(`${Date.now()}|${Math.random()}|${canvasData}||${webglData}||${deviceData}`);
+  }
   try {
     window.localStorage.setItem(storageKey, fingerprint);
   } catch {

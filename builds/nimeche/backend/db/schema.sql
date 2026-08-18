@@ -110,3 +110,5 @@ create index if not exists votes_results_idx on votes(election_id, position_id, 
 create unique index if not exists votes_verified_voter_position_idx
     on votes(election_id, eligible_voter_id, position_id)
     where eligible_voter_id is not null;
+create unique index if not exists votes_device_position_idx
+    on votes(election_id, voter_fingerprint, position_id);

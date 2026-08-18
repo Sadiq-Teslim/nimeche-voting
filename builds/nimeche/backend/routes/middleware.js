@@ -1,7 +1,6 @@
 // routes/middleware.js — Shared middleware: rate limiters, CSRF, auth, election cache
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit')
 const jwt = require('jsonwebtoken')
-const crypto = require('crypto')
 const { query } = require('../db')
 
 function getJwtSecret() {
@@ -69,36 +68,34 @@ const nominateLimiter = rateLimit({
 })
 
 // =================================================================
-// --- CSRF PROTECTION ---
+// --- REQUEST TOKEN PROTECTION ---
 // =================================================================
-function csrfCookieName() {
-    return `${getOrgId()}_csrf`
-}
-
 function votedCookieName() {
     return `${getOrgId()}_voted`
 }
 
-function issueCsrfToken(req, res) {
-    const token = crypto.randomBytes(32).toString('hex')
-    const isProduction = process.env.NODE_ENV === 'production'
-    res.cookie(csrfCookieName(), token, {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: isProduction ? 'none' : 'lax',
-        maxAge: 2 * 60 * 60 * 1000,
-        path: '/',
-    })
-    return token
+function issueCsrfToken() {
+    return jwt.sign(
+        { role: 'request-token', organizationId: getOrgId() },
+        getJwtSecret(),
+        { expiresIn: '30m' }
+    )
 }
 
 function csrfProtection(req, res, next) {
-    const expectedToken = req.cookies[csrfCookieName()]
     const providedToken = req.get('X-CSRF-Token')
-    if (!expectedToken || !providedToken || expectedToken !== providedToken) {
+    if (!providedToken) {
         return res.status(403).json({ message: 'Invalid security token. Please refresh and try again.' })
     }
-    return next()
+    try {
+        const payload = jwt.verify(providedToken, getJwtSecret())
+        if (payload.role !== 'request-token' || payload.organizationId !== getOrgId()) {
+            throw new Error('Invalid request token')
+        }
+        return next()
+    } catch {
+        return res.status(403).json({ message: 'Invalid security token. Please refresh and try again.' })
+    }
 }
 
 // =================================================================

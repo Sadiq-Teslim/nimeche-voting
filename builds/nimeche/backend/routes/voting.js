@@ -64,7 +64,7 @@ async function getDbVotedCategoryIds(orgId, electionId, voterId, categoryIds = [
 
 // Provide CSRF token
 router.get('/csrf-token', (req, res) => {
-    res.json({ csrfToken: issueCsrfToken(req, res) })
+    res.json({ csrfToken: issueCsrfToken() })
 })
 
 // Submit votes — immediate, no email verification
@@ -168,7 +168,7 @@ router.post('/submit-votes', voteLimiter, csrfProtection, requireVoter, async (r
                 const voteRes = await client.query(
                     `insert into votes (organization_id, election_id, eligible_voter_id, voter_fingerprint, department_id, position_id, candidate_id)
                      values ($1, $2, $3, $4, $5, $6, $7)
-                     on conflict (election_id, eligible_voter_id, position_id) where eligible_voter_id is not null do nothing
+                     on conflict do nothing
                      returning position_id`,
                     [orgId, electionId, req.voter.id, fingerprint, department, categoryId, approvedCandidateId]
                 )
